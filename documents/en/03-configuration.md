@@ -138,6 +138,12 @@ From `docker/transcriber/app.py`. Unlike the downloader, a value that is not a n
 | `DTK_TRANSCRIBER_THREADS` | `2` | ONNX Runtime threads per job. Keep it at or under the container's `cpus`. |
 | `DTK_TRANSCRIBER_WORKERS` | `1` | Jobs at once. Each one is a full set of threads and its own copy of the decoded audio. |
 | `DTK_TRANSCRIBER_QUEUE` | `8` | Jobs waiting behind those. Past it the sidecar answers 429. |
+| `DTK_TRANSCRIBER_QWEN_API_KEY` | empty | Alibaba Cloud Model Studio key. Empty disables the Qwen engine without affecting local FunASR. |
+| `DTK_TRANSCRIBER_QWEN_BASE_URL` | empty | Workspace-specific OpenAI-compatible base URL, ending in `/compatible-mode/v1`. |
+| `DTK_TRANSCRIBER_QWEN_WORKERS` | `2` | Qwen jobs at once, independent of local workers. |
+| `DTK_TRANSCRIBER_QWEN_QUEUE_SIZE` | `8` | Qwen jobs waiting behind those workers. |
+| `DTK_TRANSCRIBER_QWEN_TIMEOUT_SECONDS` | `300` | Timeout for one Qwen chunk request. |
+| `DTK_TRANSCRIBER_QWEN_MAX_RETRIES` | `2` | Retries for rate limits, transient server failures and network timeouts. |
 | `DTK_TRANSCRIBER_JOB_HISTORY` | `64` | Finished jobs kept so a restarted worker can still collect their results. Never below workers plus queue. |
 | `DTK_TRANSCRIBER_PROGRESS_LOG_SECONDS` | `30` | How often a running job logs its progress. At least 5. |
 | `DTK_TRANSCRIBER_TIMEOUT_SECONDS` | `3600` | ffmpeg decode limit for one file, at least 60. The worker reads the same variable. |

@@ -2058,6 +2058,8 @@
       "title": "Transcription details",
       "loading": "Loading transcription…",
       "progress": "{stage} · {percent, number}%",
+      "progressWithStep": "{stage} · {step} · {percent, number}%",
+      "stageWithStep": "{stage} · {step}",
       "export": "Export .txt",
       "noText": "No final text is available yet.",
       "model": "Model",
@@ -2092,12 +2094,35 @@
       "alreadySettled": "The transcription had already finished, so there was nothing to cancel"
     },
     "stage": {
+      "preparing_audio": "Preparing audio",
+      "recognizing": "Recognizing speech",
+      "post_processing": "Post-processing text"
+    },
+    "step": {
+      "decoding_audio": "Decoding audio",
+      "extracting_and_splitting_audio": "Extracting and splitting audio",
+      "detecting_speech": "Detecting speech",
+      "local_inference": "Running local inference",
+      "external_request": "Calling external transcription API",
+      "merging_results": "Merging chunk results",
+      "adding_punctuation": "Adding punctuation",
+      "normalizing_text": "Normalizing text"
+    },
+    "progress": {
       "queued": "Queued",
-      "decode": "Decoding audio",
-      "vad": "Finding speech",
-      "asr": "Recognising speech",
-      "punctuation": "Adding punctuation",
-      "normalization": "Writing numbers as digits"
+      "processing": "Processing"
+    },
+    "engines": {
+      "title": "Transcription engines",
+      "description": "Current availability and load. Refresh manually after changing the transcriber configuration.",
+      "local": "Local FunASR",
+      "qwen": "Qwen3-ASR",
+      "model": "Model",
+      "workers": "Workers",
+      "running": "Running",
+      "queued": "Queued",
+      "unavailable": "Engine status could not be loaded.",
+      "stale": "The refresh failed. Showing the last successfully loaded engine status."
     },
     "page": {
       "range": "{from}-{to} of {total}",
@@ -2107,8 +2132,8 @@
     "transcriber": {
       "offTitle": "Transcription is not turned on",
       "offBody": "The transcriber is optional and off by default. With the guided install, turn it on from the menu: bash install.sh --manage, then Manage, 11 (Transcription on or off). On an install of your own, start the transcriber compose profile and set DTK_TRANSCRIBER_URL.",
-      "downTitle": "The transcriber is not answering",
-      "downBody": "It is configured, but it failed its health check, so nothing can be transcribed until it is back. See whether its container is running with ./dtkctl ps, and why it stopped with ./dtkctl logs transcriber.",
+      "downTitle": "The transcription service is unavailable",
+      "downBody": "It is configured, but it is not answering or no transcription engine is ready. Check the engine cards, then use ./dtkctl ps and ./dtkctl logs transcriber if the container needs attention.",
       "guide": "How to turn it on"
     }
   },
@@ -2120,6 +2145,12 @@
     "unavailableHint": "Start it with --profile downloader and set DTK_DOWNLOADER_URL. Everything else on this instance is unaffected; only fetching the bytes is missing.",
     "transcription": {
       "action": "Transcribe video",
+      "engine": "Transcription engine",
+      "local": "Local FunASR",
+      "qwen": "Qwen API",
+      "localHint": "Runs on this server. Audio is not sent to an external transcription provider.",
+      "qwenHint": "Sends extracted audio chunks to the configured Alibaba Cloud Qwen API.",
+      "engineUnavailable": "The selected transcription engine is unavailable.",
       "failed": "Could not start the transcription",
       "evicted": "The video file has been cleaned up. Download it again before transcribing.",
       "unfinished": "Wait for the download to finish before transcribing.",

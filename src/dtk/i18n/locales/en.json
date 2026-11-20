@@ -871,6 +871,7 @@
       },
       "TranscriptionRequest": {
         "download_id": "Download UUID containing the source video.",
+        "engine": "Transcription engine. `local` keeps the audio on this instance; `qwen` sends extracted audio to the configured Qwen API.",
         "normalize": "Apply contextual Chinese inverse text normalization to numbers, dates, amounts and similar expressions.",
         "refresh": "Create a new transcription instead of reusing a completed match."
       },

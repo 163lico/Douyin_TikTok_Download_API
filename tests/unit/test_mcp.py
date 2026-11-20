@@ -865,7 +865,8 @@ class TestTranscriptionProgress:
         monkeypatch.setattr(mcp_tools, "TRANSCRIPTION_PROGRESS_POLL_SECONDS", 0.005)
         snapshots = [
             {
-                "stage": "decode",
+                "stage": "preparing_audio",
+                "step": "decoding_audio",
                 "revision": 1,
                 "processed_ms": 0,
                 "duration_ms": None,
@@ -873,7 +874,8 @@ class TestTranscriptionProgress:
                 "partial_text": "",
             },
             {
-                "stage": "asr",
+                "stage": "recognizing",
+                "step": "local_inference",
                 "revision": 2,
                 "processed_ms": 250,
                 "duration_ms": 1000,
@@ -881,7 +883,8 @@ class TestTranscriptionProgress:
                 "partial_text": "Hello",
             },
             {
-                "stage": "asr",
+                "stage": "recognizing",
+                "step": "local_inference",
                 "revision": 3,
                 "processed_ms": 250,
                 "duration_ms": 1000,
@@ -889,7 +892,8 @@ class TestTranscriptionProgress:
                 "partial_text": "Hello world",
             },
             {
-                "stage": "asr",
+                "stage": "recognizing",
+                "step": "local_inference",
                 "revision": 4,
                 "processed_ms": 750,
                 "duration_ms": 1000,
@@ -897,7 +901,8 @@ class TestTranscriptionProgress:
                 "partial_text": "Hello world",
             },
             {
-                "stage": "punctuation",
+                "stage": "post_processing",
+                "step": "adding_punctuation",
                 "revision": 5,
                 "processed_ms": 1000,
                 "duration_ms": 1000,
@@ -932,7 +937,14 @@ class TestTranscriptionProgress:
 
     async def test_a_client_without_progress_token_uses_the_original_wait_path(self):
         transcriptions = FakeTranscriptions(
-            [{"stage": "asr", "revision": 1, "partial_text": "not observed"}]
+            [
+                {
+                    "stage": "recognizing",
+                    "step": "local_inference",
+                    "revision": 1,
+                    "partial_text": "not observed",
+                }
+            ]
         )
         tasks = FakeTasks(wait=TaskOutcome(TASK_ID, TaskState.DONE, {"state": "done"}))
         context = ProgressContext(enabled=False)
@@ -954,7 +966,8 @@ class TestTranscriptionProgress:
         transcriptions = FakeTranscriptions(
             [
                 {
-                    "stage": "asr",
+                    "stage": "recognizing",
+                    "step": "local_inference",
                     "revision": 1,
                     "processed_ms": 100,
                     "duration_ms": 1000,
@@ -1003,7 +1016,8 @@ class TestTranscriptionProgress:
         transcriptions = FakeTranscriptions(
             [
                 {
-                    "stage": "asr",
+                    "stage": "recognizing",
+                    "step": "local_inference",
                     "revision": 1,
                     "processed_ms": 500,
                     "duration_ms": 1000,
@@ -1620,7 +1634,8 @@ class TestHttpTransport:
         transcriptions = FakeTranscriptions(
             [
                 {
-                    "stage": "asr",
+                    "stage": "recognizing",
+                    "step": "local_inference",
                     "revision": 1,
                     "processed_ms": 500,
                     "duration_ms": 1000,
@@ -1652,7 +1667,14 @@ class TestHttpTransport:
 
         _authenticate(monkeypatch, frozenset({Scope.TRANSCRIPTION_WRITE}))
         transcriptions = FakeTranscriptions(
-            [{"stage": "asr", "revision": 1, "partial_text": "Temporary text"}]
+            [
+                {
+                    "stage": "recognizing",
+                    "step": "local_inference",
+                    "revision": 1,
+                    "partial_text": "Temporary text",
+                }
+            ]
         )
         tasks = FakeTasks(wait=TaskOutcome(TASK_ID, TaskState.DONE, {"state": "done"}))
         with TestClient(_mounted_app(tasks, transcriptions=transcriptions)) as client:

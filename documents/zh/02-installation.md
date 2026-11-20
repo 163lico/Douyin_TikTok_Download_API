@@ -819,23 +819,22 @@ PID 1 必须去回收。
 
 ### transcriber（profile `transcriber`）
 
-一个包着量化 FunASR 流水线的小 FastAPI 服务：Paraformer-large 识别语音，FSMN-VAD 切分语段，CT-Transformer
-加标点，最后做中文数字规范化（ITN）。它把下载器已经存下来的视频转成文字，自己从不去抓任何媒体。
+一个提供两套显式引擎的小 FastAPI 服务：本地量化 FunASR 流水线，以及只在请求携带 `"engine": "qwen"` 时
+调用的可选 Qwen3-ASR-Flash。它把下载器已经存下来的视频转成文字，自己从不去抓任何媒体。
 
 它的一切设计都是因为要处理没人审过的文件：
 
-- **它没有任何网络出口。** 它只在 `compute` 上，而那个网络是 `internal: true`。模型从
-  `DTK_TRANSCRIBER_MODEL_PATH` 指向的宿主机目录只读挂载到 `/models/funasr`，容器从不下载模型——模型缺了或
-  坏了，表现是健康检查不过，而不是悄悄去拉一份。怎么准备模型见 [准备 FunASR ONNX 模型](./18-funasr-models.md)。
+- **本地推理始终留在本地。** 模型只读挂载到 `/models/funasr`，容器从不下载模型。独立的出口网络只供明确
+  选择千问的任务使用。怎么准备本地模型见 [准备 FunASR ONNX 模型](./18-funasr-models.md)。
 - **它不留下任何比它活得久的东西。** `media-data` 只读挂载，根文件系统只读，ffmpeg 把音频以采样流的形式直接
   送进进程，所以你的文件旁边不会多出 WAV。唯一可写的路径是 `/tmp` 上 1 GiB 的 tmpfs。
-- **它不持有任何密钥。** `DTK_SECRET_KEY`、`DTK_DATABASE_URL` 和 `DTK_REDIS_URL` 都被置空，和下载器一样。
-  所有 capability 都被丢掉，以 UID 10001 运行。
+- **它持有的凭据范围很窄。** 数据库和 Redis 凭据被置空；启用千问时只传入它的 API Key，且绝不返回或写入
+  日志。所有 capability 都被丢掉，以 UID 10001 运行。
 
 默认一次只跑一个任务（`DTK_TRANSCRIBER_WORKERS`），后面最多排八个（`DTK_TRANSCRIBER_QUEUE`），再多就返回
 `429`；这样被拒的转写会标记为失败并写明原因，稍后重新发起就行。健康检查读的是 `/health` 返回体里的
 `status` 字段，模型缺失或加载失败时它是 `degraded`，所以没带模型就启动的容器会被报成 unhealthy，而不是
-接下它跑不了的任务。
+接下它跑不了的任务。千问有独立的 worker 数和队列；任一引擎不可用都不会阻断另一套。
 
 ## 可选 profile
 

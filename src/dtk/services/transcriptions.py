@@ -18,7 +18,10 @@ from dtk.db.models import ArchivedContent, MediaDownload, Transcription
 from dtk.ops.capacity import MEDIA_PATH
 from dtk.services.archive import LIKE_ESCAPE, escape_like
 
-MODEL: Final = "paraformer-zh-large-onnx-int8"
+MODELS: Final = {
+    "local": "paraformer-zh-large-onnx-int8",
+    "qwen": "qwen3-asr-flash",
+}
 NORMALIZER: Final = "wetext-zh-itn-0.1.8"
 NORMALIZATION_FAILURE_POLICIES: Final = frozenset({"fallback", "fail"})
 LIVE_STATES: Final = ("queued", "running")
@@ -112,6 +115,7 @@ async def prepare(
     session: AsyncSession,
     download_id: uuid.UUID,
     *,
+    engine: str = "local",
     normalize: bool,
     normalization_failure_policy: str,
     refresh: bool,
@@ -121,6 +125,9 @@ async def prepare(
     if download is None:
         raise NotFound("no such download", details={"download_id": str(download_id)})
     source = _source(download)
+    if engine not in MODELS:
+        raise InvalidParam("engine must be local or qwen")
+    model = MODELS[engine]
     policy = validate_normalization_failure_policy(normalization_failure_policy)
     normalizer = NORMALIZER if normalize else None
     persisted_policy = policy if normalize else None
@@ -131,7 +138,8 @@ async def prepare(
                 .where(
                     Transcription.download_id == download_id,
                     Transcription.source_sha256 == source["sha256"],
-                    Transcription.model == MODEL,
+                    Transcription.engine == engine,
+                    Transcription.model == model,
                     Transcription.normalization_requested.is_(normalize),
                     Transcription.normalizer.is_(None)
                     if normalizer is None
@@ -157,7 +165,8 @@ async def prepare(
         download_id=download.id,
         platform=download.platform,
         content_id=download.content_id,
-        model=MODEL,
+        engine=engine,
+        model=model,
         normalization_requested=normalize,
         normalization_applied=False,
         normalizer=normalizer,
@@ -235,7 +244,12 @@ async def latest_for_downloads(
         return {}
     rows = (
         await session.execute(
-            select(Transcription.download_id, Transcription.id, Transcription.state)
+            select(
+                Transcription.download_id,
+                Transcription.id,
+                Transcription.state,
+                Transcription.engine,
+            )
             .where(
                 Transcription.download_id.in_(unique),
                 Transcription.state.in_(OPENABLE_STATES),
@@ -244,10 +258,14 @@ async def latest_for_downloads(
         )
     ).all()
     found: dict[uuid.UUID, dict[str, Any]] = {}
-    for download_id, transcription_id, state in rows:
+    for download_id, transcription_id, state, engine in rows:
         if download_id is None or download_id in found:
             continue
-        found[download_id] = {"transcription_id": str(transcription_id), "state": state}
+        found[download_id] = {
+            "transcription_id": str(transcription_id),
+            "state": state,
+            "engine": engine,
+        }
     return found
 
 
@@ -367,6 +385,7 @@ def as_dict(row: Transcription, *, reused: str | None = None) -> dict[str, Any]:
         "platform": row.platform,
         "content_id": row.content_id,
         "state": row.state,
+        "engine": row.engine,
         "text_preview": (row.text or "")[:160],
         "text": row.text,
         "duration_ms": row.duration_ms,
@@ -400,6 +419,7 @@ def as_list_dict(row: Transcription) -> dict[str, Any]:
         "platform": row.platform,
         "content_id": row.content_id,
         "state": row.state,
+        "engine": row.engine,
         "text_preview": (row.text or "")[:160],
         "duration_ms": row.duration_ms,
         "model": row.model,
@@ -424,7 +444,7 @@ def as_list_dict(row: Transcription) -> dict[str, Any]:
 
 __all__ = [
     "LIVE_STATES",
-    "MODEL",
+    "MODELS",
     "NORMALIZER",
     "OPENABLE_STATES",
     "TERMINAL_STATES",

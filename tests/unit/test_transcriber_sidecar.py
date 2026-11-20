@@ -1,7 +1,8 @@
-"""The transcriber sidecar stays offline, bounded, idempotent and path-safe."""
+"""The transcriber sidecar stays bounded, idempotent, secret-safe and path-safe."""
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from docker.transcriber import app as sidecar
 from fastapi.testclient import TestClient
@@ -27,13 +29,13 @@ class FakeBackend:
         normalize: bool,
         failure_policy: str,
         progress=None,
-        stage=None,
+        transition=None,
         segment=None,
     ):
         self.normalize = normalize
         self.failure_policy = failure_policy
-        if stage is not None:
-            stage("asr")
+        if transition is not None:
+            transition("recognizing", "local_inference")
         if progress is not None:
             progress(0.5, 1.234)
         if segment is not None:
@@ -57,6 +59,7 @@ def test_runtime_dependencies_pin_portable_onnx_pipeline():
     assert "imageio-ffmpeg==0.6.0" in requirements
     assert "onnxruntime==1.23.2" in requirements
     assert "wetext==0.1.8" in requirements
+    assert "httpx==0.28.1" in requirements
 
 
 def test_runtime_image_uses_the_bundled_ffmpeg_wheel():
@@ -73,6 +76,8 @@ def test_compose_healthcheck_rejects_a_degraded_model_backend():
 
     assert 'health.get("status") != "ok"' in transcriber
     assert "raise SystemExit(1)" in transcriber
+    assert "transcriber-egress" in transcriber
+    assert compose.count('DTK_TRANSCRIBER_QWEN_API_KEY: ""') == 6
 
 
 def test_decode_invokes_the_resolved_ffmpeg_binary(monkeypatch, tmp_path):
@@ -141,6 +146,19 @@ def test_normalization_defaults_to_enabled_with_fallback():
     request = sidecar.JobRequest(**base)
     assert request.normalize is True
     assert request.normalization_failure_policy == "fallback"
+    assert request.engine == "local"
+
+
+def test_qwen_engine_requires_the_qwen_model():
+    request = sidecar.JobRequest(
+        id="a" * 32,
+        path="post/video.mp4",
+        engine="qwen",
+        model="qwen3-asr-flash",
+    )
+    assert request.engine == "qwen"
+    with pytest.raises(ValueError):
+        sidecar.JobRequest(id="b" * 32, path="post/video.mp4", engine="qwen")
 
 
 def test_health_reports_degraded_when_the_models_are_unavailable(monkeypatch):
@@ -156,6 +174,181 @@ def test_health_reports_degraded_when_the_models_are_unavailable(monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "degraded"
     assert "missing model_quant.onnx" in response.json()["detail"]
+
+
+def test_qwen_remains_ready_when_local_models_are_unavailable(monkeypatch):
+    class FakeQwen:
+        async def aclose(self):
+            return None
+
+    def missing_models():
+        raise RuntimeError("offline model missing")
+
+    monkeypatch.setattr(sidecar, "_validate_models", missing_models)
+    app = sidecar.create_app(qwen_backend=FakeQwen())
+    with TestClient(app) as client:
+        health = client.get("/health").json()
+
+    assert health["status"] == "ok"
+    assert health["engines"]["local"]["ready"] is False
+    assert health["engines"]["qwen"]["ready"] is True
+
+
+def test_qwen_job_uses_its_own_backend(tmp_path, monkeypatch):
+    class FakeQwen:
+        async def transcribe(
+            self,
+            path,
+            normalize,
+            failure_policy,
+            *,
+            job_id,
+            progress,
+            transition,
+            segment,
+            chunk,
+        ):
+            transition("recognizing", "external_request")
+            chunk(1, 1)
+            segment("cloud text")
+            progress(1.0, 1.0)
+            return {
+                "text": "cloud text",
+                "duration_ms": 1000,
+                "normalization_requested": normalize,
+                "normalization_applied": False,
+                "normalizer": sidecar.NORMALIZER_NAME if normalize else None,
+                "normalization_error": None,
+            }
+
+        async def aclose(self):
+            return None
+
+    media = tmp_path / "post"
+    media.mkdir()
+    (media / "video.mp4").write_bytes(b"video")
+    monkeypatch.setattr(sidecar, "MEDIA_ROOT", tmp_path)
+    app = sidecar.create_app(FakeBackend(), FakeQwen())
+    with TestClient(app) as client:
+        response = client.post(
+            "/jobs",
+            json={
+                "id": "c" * 32,
+                "path": "post/video.mp4",
+                "engine": "qwen",
+                "model": "qwen3-asr-flash",
+            },
+        )
+        result = _done(client, "c" * 32)
+
+    assert response.status_code == 202
+    assert result["state"] == "done"
+    assert result["engine"] == "qwen"
+    assert result["text"] == "cloud text"
+    assert result["chunk_index"] == 1
+    assert result["chunk_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_qwen_request_uses_data_uri_disables_native_itn_and_retries(monkeypatch, tmp_path):
+    calls = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(429, headers={"retry-after": "0"})
+        return httpx.Response(
+            200,
+            headers={"x-request-id": "request-1"},
+            json={"choices": [{"message": {"content": "recognized text"}}]},
+        )
+
+    audio = tmp_path / "chunk.mp3"
+    audio.write_bytes(b"audio")
+    backend = sidecar.QwenBackend.__new__(sidecar.QwenBackend)
+    backend._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    backend._owns_client = True
+    monkeypatch.setattr(sidecar, "QWEN_API_KEY", "secret-key")
+    monkeypatch.setattr(sidecar, "QWEN_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.setattr(sidecar, "QWEN_MAX_RETRIES", 1)
+
+    try:
+        text = await backend._recognize(audio, job_id="d" * 32, index=1)
+    finally:
+        await backend.aclose()
+
+    assert text == "recognized text"
+    assert len(calls) == 2
+    assert calls[-1].headers["authorization"] == "Bearer secret-key"
+    body = __import__("json").loads(calls[-1].content)
+    assert body["model"] == "qwen3-asr-flash"
+    assert body["asr_options"] == {"enable_itn": False}
+    data = body["messages"][0]["content"][0]["input_audio"]["data"]
+    assert data == "data:audio/mpeg;base64,YXVkaW8="
+
+
+@pytest.mark.asyncio
+async def test_qwen_rejects_a_chunk_when_base64_exceeds_the_limit(monkeypatch, tmp_path):
+    audio = tmp_path / "chunk.mp3"
+    audio.write_bytes(b"audio")
+    backend = sidecar.QwenBackend.__new__(sidecar.QwenBackend)
+    backend._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _request: pytest.fail("an oversized chunk must not be sent")
+        )
+    )
+    backend._owns_client = True
+    monkeypatch.setattr(sidecar, "QWEN_MAX_DATA_BYTES", 6)
+
+    try:
+        with pytest.raises(sidecar.QwenRequestFailed, match="10 MB"):
+            await backend._recognize(audio, job_id="f" * 32, index=1)
+    finally:
+        await backend.aclose()
+
+
+@pytest.mark.asyncio
+async def test_qwen_chunks_are_merged_in_order_and_temporary_files_are_removed(tmp_path):
+    backend = sidecar.QwenBackend.__new__(sidecar.QwenBackend)
+    temporary: Path | None = None
+
+    async def extract(_path: Path, destination: Path):
+        nonlocal temporary
+        temporary = destination
+        chunks = [destination / "chunk-0000.mp3", destination / "chunk-0001.mp3"]
+        for chunk in chunks:
+            chunk.write_bytes(b"audio")
+        return chunks, 500.0
+
+    async def recognize(chunk: Path, *, job_id: str, index: int):
+        assert job_id == "e" * 32
+        return f"part {index}:{chunk.name}"
+
+    backend._extract = extract
+    backend._recognize = recognize
+    backend._normalizer = SimpleNamespace(normalize=lambda text: text.replace("\n", " | "))
+    seen_chunks = []
+    transitions = []
+
+    result = await backend.transcribe(
+        tmp_path / "video.mp4",
+        True,
+        "fallback",
+        job_id="e" * 32,
+        chunk=lambda index, count: seen_chunks.append((index, count)),
+        transition=lambda stage, step: transitions.append((stage, step)),
+    )
+
+    assert result["text"] == "part 1:chunk-0000.mp3 | part 2:chunk-0001.mp3"
+    assert result["duration_ms"] == 500_000
+    assert seen_chunks == [(1, 2), (2, 2)]
+    assert transitions == [
+        ("preparing_audio", "extracting_and_splitting_audio"),
+        ("recognizing", "external_request"),
+        ("post_processing", "merging_results"),
+        ("post_processing", "normalizing_text"),
+    ]
+    assert temporary is not None and not temporary.exists()
 
 
 def test_invalid_normalization_failure_policy_is_rejected():
@@ -182,10 +375,59 @@ def test_fun_asr_pipeline_normalizes_after_punctuation():
         normalize=lambda text: text.replace("\u4e94\u516d\u4e03\u516b", "5678")
     )
 
-    result = backend.transcribe(Path("video.mp4"), True, "fallback")
+    transitions = []
+    result = backend.transcribe(
+        Path("video.mp4"),
+        True,
+        "fallback",
+        transition=lambda stage, step: transitions.append((stage, step)),
+    )
 
     assert result["text"] == "\u9a8c\u8bc1\u78015678\u3002"
     assert result["normalization_applied"] is True
+    assert transitions == [
+        ("preparing_audio", "decoding_audio"),
+        ("recognizing", "detecting_speech"),
+        ("recognizing", "local_inference"),
+        ("post_processing", "adding_punctuation"),
+        ("post_processing", "normalizing_text"),
+    ]
+
+
+def test_fun_asr_skips_normalization_step_when_disabled():
+    backend = sidecar.FunASRBackend.__new__(sidecar.FunASRBackend)
+    backend._decode = lambda _path: [0.0] * 16000
+    backend._vad = lambda _audio: [[[0, 1000]]]
+    backend._asr = lambda _audio: ["words"]
+    backend._punc = lambda text: [f"{text}."]
+    transitions = []
+
+    result = backend.transcribe(
+        Path("video.mp4"),
+        False,
+        "fallback",
+        transition=lambda stage, step: transitions.append((stage, step)),
+    )
+
+    assert result["text"] == "words."
+    assert transitions[-1] == ("post_processing", "adding_punctuation")
+    assert ("post_processing", "normalizing_text") not in transitions
+
+
+def test_empty_audio_completes_directly_from_preparation():
+    backend = sidecar.FunASRBackend.__new__(sidecar.FunASRBackend)
+    backend._decode = lambda _path: []
+    transitions = []
+
+    result = backend.transcribe(
+        Path("video.mp4"),
+        True,
+        "fallback",
+        transition=lambda stage, step: transitions.append((stage, step)),
+    )
+
+    assert result["text"] == ""
+    assert transitions == [("preparing_audio", "decoding_audio")]
 
 
 @pytest.mark.parametrize(
@@ -205,7 +447,7 @@ def test_normalization_failure_policy_controls_job_result(
             normalize: bool,
             failure_policy: str,
             progress=None,
-            stage=None,
+            transition=None,
             segment=None,
         ):
             if failure_policy == "fail":
@@ -264,6 +506,8 @@ def test_submit_is_idempotent_and_returns_whole_text(tmp_path, monkeypatch, capl
     assert result["text"] == "text from video-transcription.mp4"
     assert result["duration_ms"] == 1234
     assert result["normalization_applied"] is True
+    assert result["stage"] is None
+    assert result["step"] is None
     assert result["partial_text"] == ""
     assert backend.normalize is True
     assert backend.failure_policy == "fallback"
@@ -284,13 +528,15 @@ def test_running_job_logs_elapsed_and_media_progress(tmp_path, monkeypatch, capl
             normalize: bool,
             failure_policy: str,
             progress=None,
-            stage=None,
+            transition=None,
             segment=None,
         ):
             if progress is not None:
                 progress(0.5, 1.0)
             time.sleep(0.08)
-            return super().transcribe(path, normalize, failure_policy, progress, stage, segment)
+            return super().transcribe(
+                path, normalize, failure_policy, progress, transition, segment
+            )
 
     media = tmp_path / "post"
     media.mkdir()
@@ -337,11 +583,11 @@ def test_running_job_exposes_provisional_text_without_logging_it(tmp_path, monke
             normalize: bool,
             failure_policy: str,
             progress=None,
-            stage=None,
+            transition=None,
             segment=None,
         ):
-            if stage is not None:
-                stage("asr")
+            if transition is not None:
+                transition("recognizing", "local_inference")
             if segment is not None:
                 segment("temporary words")
             if progress is not None:
@@ -381,6 +627,8 @@ def test_running_job_exposes_provisional_text_without_logging_it(tmp_path, monke
             time.sleep(0.005)
         assert running is not None
         assert running["partial_text"] == "temporary words"
+        assert running["stage"] == "recognizing"
+        assert running["step"] == "local_inference"
         assert running["progress_revision"] > 0
         result = _done(client, job_id)
 
@@ -485,7 +733,13 @@ def test_cancelling_a_running_job_stops_the_backend_at_its_next_segment(tmp_path
 
     class LongBackend(FakeBackend):
         def transcribe(
-            self, path, normalize, failure_policy, progress=None, stage=None, segment=None
+            self,
+            path,
+            normalize,
+            failure_policy,
+            progress=None,
+            transition=None,
+            segment=None,
         ):
             started.set()
             release.wait(2)
@@ -500,7 +754,10 @@ def test_cancelling_a_running_job_stops_the_backend_at_its_next_segment(tmp_path
         body = {"id": job_id, "path": "post/video.mp4", "model": sidecar.MODEL_NAME}
         assert client.post("/jobs", json=body).status_code == 202
         assert started.wait(2)
-        assert client.delete(f"/jobs/{job_id}").json()["state"] == "cancelled"
+        cancelled = client.delete(f"/jobs/{job_id}").json()
+        assert cancelled["state"] == "cancelled"
+        assert cancelled["stage"] is None
+        assert cancelled["step"] is None
         release.set()
         deadline = time.monotonic() + 2
         while client.get(f"/jobs/{job_id}").status_code != 404:
@@ -525,8 +782,34 @@ def test_a_failed_job_does_not_report_the_container_media_path(tmp_path, monkeyp
         result = _done(client, job_id)
 
     assert result["state"] == "failed"
+    assert result["stage"] is None
+    assert result["step"] is None
     assert str(tmp_path) not in result["error"]
     assert result["error"].startswith("<media-root>/post/video.mp4")
+
+
+def test_progress_codes_have_complete_translations_without_legacy_stages():
+    expected_stages = {"preparing_audio", "recognizing", "post_processing"}
+    expected_steps = {
+        "decoding_audio",
+        "extracting_and_splitting_audio",
+        "detecting_speech",
+        "local_inference",
+        "external_request",
+        "merging_results",
+        "adding_punctuation",
+        "normalizing_text",
+    }
+    root = Path(__file__).parents[2]
+    for language in ("en", "zh"):
+        locale = json.loads(
+            (root / "web" / "src" / "locales" / language / "console.json").read_text(
+                encoding="utf-8"
+            )
+        )["transcriptions"]
+        assert set(locale["stage"]) == expected_stages
+        assert set(locale["step"]) == expected_steps
+        assert locale["progress"]["processing"]
 
 
 def test_a_decode_that_hangs_is_bounded(monkeypatch, tmp_path):

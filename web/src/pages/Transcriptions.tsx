@@ -16,10 +16,12 @@ import {
   Select,
   StatusBadge,
   TranscriberNotice,
+  transcriberEngineState,
   transcriberGuideHref,
   type Column,
+  type TranscriptionEngine,
   useToast,
-  useTranscriberState,
+  useTranscriberStatus,
 } from '@/components'
 import { Pager, SearchBox, lastPageOffset } from '@/components/ListControls'
 import { useApiMutation, useApiQuery, useCopy, useFormatters, useInvalidate } from '@/hooks'
@@ -53,11 +55,14 @@ interface Source {
 
 interface Progress {
   state: string
-  stage: string
+  stage: string | null
+  step: string | null
   revision: number
   processed_ms: number
   duration_ms: number | null
   progress_percent: number | null
+  chunk_index: number | null
+  chunk_count: number | null
   /** Only on the detail read: the list leaves it out, since it grows with the job. */
   partial_text?: string
 }
@@ -69,6 +74,7 @@ interface TranscriptionRow {
   platform: string
   content_id: string
   state: TranscriptionState
+  engine: 'local' | 'qwen'
   text_preview?: string
   text?: string | null
   duration_ms: number | null
@@ -95,8 +101,19 @@ const LIST_KEY = ['transcriptions'] as const
 /** Rows per page: the API's own default, so the first page is what it always was. */
 const PAGE_SIZE = 100
 const LIVE = new Set<TranscriptionState>(['queued', 'running'])
-/** The sidecar's stage names, which are identifiers and are translated here. */
-const STAGES = new Set(['queued', 'decode', 'vad', 'asr', 'punctuation', 'normalization'])
+const ENGINES: readonly TranscriptionEngine[] = ['local', 'qwen']
+/** Stable cross-engine stages and engine-specific steps from the progress protocol. */
+const STAGES = new Set(['preparing_audio', 'recognizing', 'post_processing'])
+const STEPS = new Set([
+  'decoding_audio',
+  'extracting_and_splitting_audio',
+  'detecting_speech',
+  'local_inference',
+  'external_request',
+  'merging_results',
+  'adding_punctuation',
+  'normalizing_text',
+])
 
 function isLive(row: TranscriptionRow | undefined): boolean {
   return row !== undefined && LIVE.has(row.state)
@@ -132,7 +149,8 @@ export default function Transcriptions() {
   const formatters = useFormatters()
   const invalidate = useInvalidate()
   const copy = useCopy()
-  const transcriber = useTranscriberState()
+  const transcriberStatus = useTranscriberStatus()
+  const transcriber = transcriberStatus.state
   // Filters and the open drawer live in the URL, as on Downloads and the
   // Library, so the links between the three pages land on a row and a view.
   const [params, setParams] = useSearchParams()
@@ -193,6 +211,7 @@ export default function Transcriptions() {
   })
 
   const refresh = (): void => {
+    transcriberStatus.refresh()
     void invalidate(LIST_KEY)
     if (inspectingId) void invalidate(['transcriptions', 'detail', inspectingId])
   }
@@ -239,8 +258,36 @@ export default function Transcriptions() {
   // filter, and "Delete 3 selected" then deleted rows that were not on screen.
   const selectedRows = rows.filter((row) => selected.has(row.transcription_id))
   const selectedHasLive = selectedRows.some((row) => isLive(row))
-  const stageLabel = (stage: string): string =>
-    STAGES.has(stage) ? t(`transcriptions.stage.${stage}`) : stage
+  const stageLabel = (stage: string | null): string =>
+    stage !== null && STAGES.has(stage)
+      ? t(`transcriptions.stage.${stage}`)
+      : t('transcriptions.progress.processing')
+  const stepLabel = (step: string | null): string | null => {
+    if (step === null) return null
+    return STEPS.has(step)
+      ? t(`transcriptions.step.${step}`)
+      : t('transcriptions.progress.processing')
+  }
+  const progressLabel = (progress: Progress): string => {
+    if (progress.state === 'queued') return t('transcriptions.progress.queued')
+    const stage = stageLabel(progress.stage)
+    const step = stepLabel(progress.step)
+    if (step !== null && progress.progress_percent !== null) {
+      return t('transcriptions.detail.progressWithStep', {
+        stage,
+        step,
+        percent: progress.progress_percent,
+      })
+    }
+    if (step !== null) return t('transcriptions.detail.stageWithStep', { stage, step })
+    if (progress.progress_percent !== null) {
+      return t('transcriptions.detail.progress', {
+        stage,
+        percent: progress.progress_percent,
+      })
+    }
+    return stage
+  }
   const filtered = Boolean(search || stateFilter || platformFilter)
   // Off is the default, and every Transcribe button used to fail on it with
   // TRANSCRIBER_UNAVAILABLE; an empty page said to go and press one.
@@ -353,6 +400,64 @@ export default function Transcriptions() {
         description={t('transcriptions.description')}
         actions={<Button variant="secondary" onClick={refresh}>{t('common:action.refresh')}</Button>}
       />
+
+      <section className={styles.engineSection} aria-labelledby="transcription-engines-title">
+        <div className={styles.engineHeader}>
+          <div>
+            <h2 id="transcription-engines-title" className={styles.engineTitle}>
+              {t('transcriptions.engines.title')}
+            </h2>
+            <p className={styles.engineDescription}>{t('transcriptions.engines.description')}</p>
+          </div>
+        </div>
+        {transcriberStatus.isError ? (
+          <p className={styles.engineWarning}>
+            {t(
+              transcriberStatus.hasData
+                ? 'transcriptions.engines.stale'
+                : 'transcriptions.engines.unavailable',
+            )}
+          </p>
+        ) : null}
+        <div className={styles.engineGrid}>
+          {ENGINES.map((engine) => {
+            const health = transcriberStatus.engines[engine]
+            const state = transcriberEngineState(transcriberStatus, engine)
+            return (
+              <Card
+                key={engine}
+                title={t(`transcriptions.engines.${engine}`)}
+                actions={
+                  <StatusBadge
+                    kind="transcriptionEngine"
+                    value={transcriberStatus.isLoading ? 'unknown' : state}
+                    flash={false}
+                  />
+                }
+              >
+                <dl className={styles.engineDetails}>
+                  <div className={styles.engineModel}>
+                    <dt>{t('transcriptions.engines.model')}</dt>
+                    <dd>{health?.model ?? MISSING}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('transcriptions.engines.workers')}</dt>
+                    <dd>{health ? formatters.number(health.workers) : MISSING}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('transcriptions.engines.running')}</dt>
+                    <dd>{health ? formatters.number(health.running) : MISSING}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('transcriptions.engines.queued')}</dt>
+                    <dd>{health ? formatters.number(health.queued) : MISSING}</dd>
+                  </div>
+                </dl>
+              </Card>
+            )
+          })}
+        </div>
+      </section>
 
       {/* With records on screen the empty state never shows, and they are
           still readable; what is gone is starting new ones, so say that. */}
@@ -495,15 +600,8 @@ export default function Transcriptions() {
               <StatusBadge kind="transcription" value={detail.state} />
               <span className="u-mono u-xs u-muted">{formatMediaDuration(detail.duration_ms)}</span>
             </div>
-            {detail.progress ? (
-              <p className="u-xs u-muted">
-                {detail.progress.progress_percent !== null
-                  ? t('transcriptions.detail.progress', {
-                      stage: stageLabel(detail.progress.stage),
-                      percent: detail.progress.progress_percent,
-                    })
-                  : stageLabel(detail.progress.stage)}
-              </p>
+            {detail.progress && LIVE.has(detail.state) ? (
+              <p className="u-xs u-muted">{progressLabel(detail.progress)}</p>
             ) : null}
             {detail.error ? <p className={styles.error}>{detail.error}</p> : null}
             <div className={styles.textActions}>

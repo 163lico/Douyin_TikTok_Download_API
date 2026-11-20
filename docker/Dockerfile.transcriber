@@ -1,12 +1,12 @@
-# The offline transcription sidecar: FastAPI around a quantized FunASR ONNX
-# pipeline.
+# The transcription sidecar: FastAPI around a quantized local FunASR ONNX
+# pipeline and an optional, explicitly selected Qwen API adapter.
 #
 # Two properties shape this image:
 #
-#   1. Offline by construction. The ASR, VAD and punctuation models are not
-#      downloaded while the container starts; compose mounts operator-supplied
-#      model directories read-only at /models/funasr and places the service on
-#      an internal network with no internet gateway.
+#   1. Local inference remains offline. The ASR, VAD and punctuation models are
+#      not downloaded while the container starts; compose mounts operator-
+#      supplied model directories read-only at /models/funasr. A separate
+#      egress network is used only when a job explicitly selects Qwen.
 #   2. Bounded writes. Source media is mounted read-only and ffmpeg streams the
 #      first audio track straight to the process as 16 kHz mono float samples,
 #      so transcription creates no intermediate WAV beside the operator's

@@ -75,6 +75,13 @@
       "unhealthy": "不可用",
       "unknown": "未知"
     },
+    "transcriptionEngine": {
+      "available": "可用",
+      "unavailable": "不可用",
+      "unknown": "未知",
+      "notConfigured": "未配置",
+      "unreachable": "无法检测"
+    },
     "key": {
       "active": "生效中",
       "revoked": "已撤销",

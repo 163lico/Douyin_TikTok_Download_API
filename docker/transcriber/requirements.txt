@@ -9,6 +9,7 @@
 fastapi==0.141.1
 uvicorn==0.54.0
 pydantic==2.13.5
+httpx==0.28.1
 # app.py imports numpy directly; funasr-onnx caps it at this version anyway.
 numpy==1.26.4
 imageio-ffmpeg==0.6.0

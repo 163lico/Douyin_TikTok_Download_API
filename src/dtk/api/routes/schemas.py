@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -599,6 +599,10 @@ class TranscriptionRequest(Body):
     """Start or reuse a transcription for one stored video."""
 
     download_id: uuid.UUID = Field(description="Download UUID containing the source video.")
+    engine: Literal["local", "qwen"] = Field(
+        default="local",
+        description="Transcription engine: local FunASR or the configured Qwen API.",
+    )
     normalize: bool = Field(
         default=True,
         description="Apply contextual Chinese inverse text normalization to the transcript.",

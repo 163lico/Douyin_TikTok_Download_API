@@ -137,6 +137,12 @@ DTK_BIND_HOST=0.0.0.0 docker compose -p dtk -f docker/compose.yml up -d
 | `DTK_TRANSCRIBER_THREADS` | `2` | 每个任务的 ONNX Runtime 线程数。不要超过容器的 `cpus`。 |
 | `DTK_TRANSCRIBER_WORKERS` | `1` | 同时跑几个任务。每个任务都要一整套线程，外加它自己那份解码后的音频。 |
 | `DTK_TRANSCRIBER_QUEUE` | `8` | 排在后面等的任务数。超出后 sidecar 返回 429。 |
+| `DTK_TRANSCRIBER_QWEN_API_KEY` | 空 | 阿里云百炼 API Key。留空只禁用千问引擎，不影响本地 FunASR。 |
+| `DTK_TRANSCRIBER_QWEN_BASE_URL` | 空 | 业务空间专属的 OpenAI 兼容基础地址，以 `/compatible-mode/v1` 结尾。 |
+| `DTK_TRANSCRIBER_QWEN_WORKERS` | `2` | 同时执行的千问任务数，和本地 worker 分开计算。 |
+| `DTK_TRANSCRIBER_QWEN_QUEUE_SIZE` | `8` | 千问 worker 后面等待的任务数。 |
+| `DTK_TRANSCRIBER_QWEN_TIMEOUT_SECONDS` | `300` | 单个千问音频分片请求的超时。 |
+| `DTK_TRANSCRIBER_QWEN_MAX_RETRIES` | `2` | 限流、临时服务错误和网络超时的重试次数。 |
 | `DTK_TRANSCRIBER_JOB_HISTORY` | `64` | 保留多少个已结束的任务，好让重启后的 worker 还能取回结果。不会低于并发数加队列数。 |
 | `DTK_TRANSCRIBER_PROGRESS_LOG_SECONDS` | `30` | 运行中的任务多久打一次进度日志。最小 5。 |
 | `DTK_TRANSCRIBER_TIMEOUT_SECONDS` | `3600` | 单个文件 ffmpeg 解码的时间上限，最小 60。worker 也读这个变量。 |

@@ -738,6 +738,7 @@ class Transcription(Base):
             "state IN ('queued','running','done','failed','cancelled')",
             name="ck_transcriptions_state",
         ),
+        CheckConstraint("engine IN ('local','qwen')", name="ck_transcriptions_engine"),
         CheckConstraint(
             "normalization_failure_policy IS NULL OR "
             "normalization_failure_policy IN ('fallback','fail')",
@@ -751,6 +752,7 @@ class Transcription(Base):
             "ux_transcriptions_in_flight",
             "download_id",
             "source_sha256",
+            "engine",
             "model",
             "normalization_requested",
             text("COALESCE(normalizer, '')"),
@@ -769,6 +771,7 @@ class Transcription(Base):
     platform: Mapped[str] = mapped_column(Text)
     content_id: Mapped[str] = mapped_column(Text)
     state: Mapped[str] = mapped_column(Text, server_default=text("'queued'"))
+    engine: Mapped[str] = mapped_column(Text, default="local", server_default=text("'local'"))
     model: Mapped[str] = mapped_column(Text)
     normalization_requested: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     normalization_applied: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))

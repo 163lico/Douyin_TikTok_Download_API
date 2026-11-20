@@ -30,6 +30,7 @@ log = get_logger(__name__)
 
 DOWNLOADER: Final = "downloader"
 TRANSCRIBER: Final = "transcriber"
+TRANSCRIPTION_ENGINES: Final = ("local", "qwen")
 
 #: Longer than browser-rpc's one second on purpose. The downloader's /health
 #: measures the media volume as it answers, and a library of a few thousand
@@ -80,6 +81,26 @@ def _answered(started: float, *, healthy: bool) -> dict[str, Any]:
     }
 
 
+def _engine_health(value: object) -> dict[str, Any] | None:
+    """Copy only the stable, non-sensitive part of one engine snapshot."""
+    if not isinstance(value, dict) or not isinstance(value.get("ready"), bool):
+        return None
+    model = value.get("model")
+    safe_model = model[:128] if isinstance(model, str) else None
+
+    def count(name: str) -> int:
+        raw = value.get(name)
+        return max(0, raw) if isinstance(raw, int) and not isinstance(raw, bool) else 0
+
+    return {
+        "ready": value["ready"],
+        "model": safe_model,
+        "workers": count("workers"),
+        "running": count("running"),
+        "queued": count("queued"),
+    }
+
+
 async def downloader_status(
     client: DownloaderProbe | None, *, timeout: float = SIDECAR_PROBE_TIMEOUT_SECONDS
 ) -> dict[str, Any]:
@@ -126,7 +147,16 @@ async def transcriber_status(
         log.warning("ops.sidecar.unreachable", component=TRANSCRIBER, error=type(exc).__name__)
         return _down(DETAIL_UNREACHABLE)
     status = str(body.get("status") or "") if isinstance(body, dict) else ""
-    return _answered(started, healthy=status == "ok")
+    result = _answered(started, healthy=status == "ok")
+    raw_engines = body.get("engines") if isinstance(body, dict) else None
+    if isinstance(raw_engines, dict):
+        engines = {
+            name: engine
+            for name in TRANSCRIPTION_ENGINES
+            if (engine := _engine_health(raw_engines.get(name))) is not None
+        }
+        result["engines"] = engines
+    return result
 
 
 __all__ = [
@@ -136,6 +166,7 @@ __all__ = [
     "DOWNLOADER",
     "SIDECAR_PROBE_TIMEOUT_SECONDS",
     "TRANSCRIBER",
+    "TRANSCRIPTION_ENGINES",
     "DownloaderProbe",
     "TranscriberProbe",
     "downloader_status",

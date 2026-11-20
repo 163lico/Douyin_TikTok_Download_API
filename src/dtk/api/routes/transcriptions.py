@@ -126,6 +126,7 @@ async def start_transcription(
         config=request.app.state.config,
         normalization_failure_policy=settings.transcriber_normalization_failure_policy,
         download_id=body.download_id,
+        engine=body.engine,
         normalize=body.normalize,
         refresh=body.refresh,
         requested_by=principal.api_key_id,

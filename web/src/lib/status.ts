@@ -95,6 +95,26 @@ export const HEALTH_STATUS: Record<'healthy' | 'unhealthy' | 'unknown', StatusMe
   unknown: { tone: 'neutral', icon: 'minus', labelKey: 'state.health.unknown' },
 }
 
+export const TRANSCRIPTION_ENGINE_STATUS: Record<string, StatusMeta> = {
+  available: { tone: 'success', icon: 'check', labelKey: 'state.transcriptionEngine.available' },
+  unavailable: {
+    tone: 'danger',
+    icon: 'cross',
+    labelKey: 'state.transcriptionEngine.unavailable',
+  },
+  unknown: { tone: 'neutral', icon: 'minus', labelKey: 'state.transcriptionEngine.unknown' },
+  not_configured: {
+    tone: 'muted',
+    icon: 'minus',
+    labelKey: 'state.transcriptionEngine.notConfigured',
+  },
+  unreachable: {
+    tone: 'caution',
+    icon: 'alert',
+    labelKey: 'state.transcriptionEngine.unreachable',
+  },
+}
+
 /**
  * Whether the stored cookie jar still looks like a session.
  *
@@ -178,6 +198,7 @@ export type StatusKind =
   | 'circuit'
   | 'download'
   | 'transcription'
+  | 'transcriptionEngine'
   | 'health'
   | 'credential'
   | 'key'
@@ -190,6 +211,7 @@ const REGISTRY: Record<StatusKind, Record<string, StatusMeta>> = {
   circuit: CIRCUIT_STATUS,
   download: DOWNLOAD_STATUS,
   transcription: TRANSCRIPTION_STATUS,
+  transcriptionEngine: TRANSCRIPTION_ENGINE_STATUS,
   health: HEALTH_STATUS,
   credential: CREDENTIAL_STATUS,
   key: KEY_STATUS,

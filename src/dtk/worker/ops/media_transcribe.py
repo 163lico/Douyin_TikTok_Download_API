@@ -84,6 +84,7 @@ async def run(
         "id": row.id.hex,
         "download_id": str(row.download_id),
         "path": transcriptions.relative_path(row, download),
+        "engine": row.engine,
         "normalize": row.normalization_requested,
         "normalization_failure_policy": row.normalization_failure_policy or "fallback",
         "model": row.model,

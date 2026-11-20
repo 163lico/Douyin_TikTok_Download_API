@@ -62,7 +62,7 @@ async def _download(media_root: Path) -> uuid.UUID:
 
 
 async def _start(
-    download_id: uuid.UUID, config: Settings
+    download_id: uuid.UUID, config: Settings, *, engine: str = "local"
 ) -> transcription_requests.TranscriptionStart:
     async with session_scope() as session:
         return await transcription_requests.start(
@@ -70,6 +70,7 @@ async def _start(
             config=config,
             normalization_failure_policy="fallback",
             download_id=download_id,
+            engine=engine,
             normalize=True,
             refresh=False,
         )
@@ -104,6 +105,19 @@ async def test_a_second_request_joins_the_live_one(api_app, media_root):
 
     assert second.reused == "in_flight"
     assert second.row.id == first.row.id
+
+
+async def test_different_engines_create_distinct_transcriptions(api_app, media_root):
+    download_id = await _download(media_root)
+
+    local = await _start(download_id, Settings(), engine="local")
+    qwen = await _start(download_id, Settings(), engine="qwen")
+
+    assert local.row.id != qwen.row.id
+    assert local.row.engine == "local"
+    assert local.row.model == "paraformer-zh-large-onnx-int8"
+    assert qwen.row.engine == "qwen"
+    assert qwen.row.model == "qwen3-asr-flash"
 
 
 async def test_the_queue_ceiling_applies_to_transcriptions(api_app, media_root):

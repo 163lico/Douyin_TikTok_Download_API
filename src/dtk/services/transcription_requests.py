@@ -40,6 +40,7 @@ async def start(
     config: Any,
     normalization_failure_policy: str,
     download_id: uuid.UUID,
+    engine: str = "local",
     normalize: bool,
     refresh: bool,
     requested_by: uuid.UUID | None = None,
@@ -50,6 +51,7 @@ async def start(
         row, reused = await transcriptions.prepare(
             session,
             download_id,
+            engine=engine,
             normalize=normalize,
             normalization_failure_policy=normalization_failure_policy,
             refresh=refresh,
@@ -64,6 +66,7 @@ async def start(
         row, reused = await transcriptions.prepare(
             session,
             download_id,
+            engine=engine,
             normalize=normalize,
             normalization_failure_policy=normalization_failure_policy,
             refresh=False,
@@ -104,6 +107,7 @@ async def start(
         "media.transcription.requested",
         transcription_id=str(row.id),
         download_id=str(download_id),
+        engine=engine,
         normalize=normalize,
     )
     return TranscriptionStart(row=row, reused=None)

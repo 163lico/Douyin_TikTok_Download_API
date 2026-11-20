@@ -65,6 +65,8 @@ def test_the_error_code_is_declared_as_stable(document) -> None:
 def test_transcription_normalization_is_public_and_enabled_by_default(document) -> None:
     properties = document["components"]["schemas"]["TranscriptionRequest"]["properties"]
     assert properties["normalize"]["default"] is True
+    assert properties["engine"]["default"] == "local"
+    assert properties["engine"]["enum"] == ["local", "qwen"]
 
 
 def test_no_operation_promises_a_422_this_api_never_sends(document) -> None:

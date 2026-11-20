@@ -170,6 +170,7 @@ async def test_a_download_names_its_transcript(client: Any) -> None:
     assert listed["transcription"] == {
         "transcription_id": str(transcription_id),
         "state": "done",
+        "engine": "local",
     }
 
     # The single read too: a drawer opened from /downloads?id= has no listing.
@@ -221,6 +222,7 @@ async def test_a_stored_post_says_when_it_was_saved_and_what_became_of_it(client
     assert row["stored"]["transcription"] == {
         "transcription_id": str(transcription_id),
         "state": "running",
+        "engine": "local",
     }
 
 

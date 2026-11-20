@@ -971,27 +971,28 @@ the Go runtime — not the size of the files.
 
 ### transcriber (profile `transcriber`)
 
-A small FastAPI service around a quantized FunASR pipeline: Paraformer-large for speech, FSMN-VAD to
-cut it into segments, CT-Transformer for punctuation, then Chinese inverse text normalization. It
-turns a video the downloader already stored into text; it never fetches media of its own.
+A small FastAPI service with two explicit engines: a quantized local FunASR pipeline, and optional
+Qwen3-ASR-Flash calls for requests carrying `"engine": "qwen"`. It turns a video the downloader
+already stored into text; it never fetches media of its own.
 
 Everything about it is shaped by handling files nobody vetted:
 
-- **It has no network route.** It sits on `compute` only, which is `internal: true`. The models are
-  mounted read-only at `/models/funasr` from the host directory in `DTK_TRANSCRIBER_MODEL_PATH`, and
-  the container never downloads them — a missing or malformed model is a failed health check, not a
-  silent fetch. [Preparing the FunASR ONNX models](./18-funasr-models.md) covers getting them.
+- **Local inference stays local.** Models are mounted read-only at `/models/funasr`; the container
+  never downloads them. A dedicated egress network is used only by explicitly selected Qwen jobs.
+  [Preparing the FunASR ONNX models](./18-funasr-models.md) covers the local engine.
 - **It writes nothing that outlives it.** `media-data` is mounted read-only, the root filesystem is
   read-only, and ffmpeg streams the audio into the process as samples, so no WAV is left beside your
   files. The only writable path is a 1 GiB tmpfs on `/tmp`.
-- **It holds no secrets.** `DTK_SECRET_KEY`, `DTK_DATABASE_URL` and `DTK_REDIS_URL` are blanked, as
-  on the downloader. All capabilities are dropped and it runs as UID 10001.
+- **Its credentials are narrow.** Database and Redis credentials are blanked. When Qwen is enabled,
+  only its API key is supplied; it is never returned or logged. All capabilities are dropped and
+  the service runs as UID 10001.
 
 It runs one job at a time by default (`DTK_TRANSCRIBER_WORKERS`) with eight queued behind it
 (`DTK_TRANSCRIBER_QUEUE`), and refuses with `429` past that; a transcription refused that way is
 marked failed with the reason, and starting it again later is the fix. Its healthcheck reads the `status` field of `/health`, which is `degraded` while the models
 are missing or failed to load, so a container that started without them is reported unhealthy
-instead of accepting jobs it cannot run.
+instead of accepting jobs it cannot run. Qwen has its own worker count and queue; either engine can
+remain ready while the other is unavailable.
 
 ## The optional profiles
 

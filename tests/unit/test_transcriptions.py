@@ -28,6 +28,7 @@ def test_listing_never_embeds_the_complete_transcript() -> None:
         content_id="7408915107113127220",
         state="done",
         text="word " * 500,
+        engine="local",
         model="test-model",
         normalization_requested=True,
         normalization_applied=True,
@@ -40,6 +41,7 @@ def test_listing_never_embeds_the_complete_transcript() -> None:
     result = transcriptions.as_list_dict(row)
 
     assert "text" not in result
+    assert result["engine"] == "local"
     assert result["text_preview"] == ("word " * 500)[:160]
 
 
@@ -122,14 +124,18 @@ async def test_the_newest_openable_transcription_wins() -> None:
     other = uuid.uuid4()
     newest, older, theirs = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     session = ListingSession(
-        rows=[(download, newest, "running"), (download, older, "done"), (other, theirs, "done")]
+        rows=[
+            (download, newest, "running", "qwen"),
+            (download, older, "done", "local"),
+            (other, theirs, "done", "local"),
+        ]
     )
 
     found = await transcriptions.latest_for_downloads(cast(Any, session), [download, other])
 
     assert found == {
-        download: {"transcription_id": str(newest), "state": "running"},
-        other: {"transcription_id": str(theirs), "state": "done"},
+        download: {"transcription_id": str(newest), "state": "running", "engine": "qwen"},
+        other: {"transcription_id": str(theirs), "state": "done", "engine": "local"},
     }
     sql = str(session.statements[0].compile(dialect=postgresql.dialect()))
     # A failed one is not worth opening: asking again is what the reader wants.

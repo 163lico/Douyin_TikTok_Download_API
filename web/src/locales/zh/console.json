@@ -2058,6 +2058,8 @@
       "title": "转写详情",
       "loading": "正在加载转写内容…",
       "progress": "{stage} · {percent, number}%",
+      "progressWithStep": "{stage} · {step} · {percent, number}%",
+      "stageWithStep": "{stage} · {step}",
       "export": "导出 .txt",
       "noText": "最终转写文本尚未生成。",
       "model": "模型",
@@ -2092,12 +2094,35 @@
       "alreadySettled": "该转写已经结束，没有可取消的内容"
     },
     "stage": {
+      "preparing_audio": "准备音频",
+      "recognizing": "语音识别",
+      "post_processing": "文本后处理"
+    },
+    "step": {
+      "decoding_audio": "解码音频",
+      "extracting_and_splitting_audio": "提取并切分音频",
+      "detecting_speech": "检测语音片段",
+      "local_inference": "本地模型推理",
+      "external_request": "调用外部转写 API",
+      "merging_results": "合并分片结果",
+      "adding_punctuation": "添加标点",
+      "normalizing_text": "规范文本"
+    },
+    "progress": {
       "queued": "排队中",
-      "decode": "解码音频",
-      "vad": "检测语音片段",
-      "asr": "识别语音",
-      "punctuation": "添加标点",
-      "normalization": "规范数字写法"
+      "processing": "处理中"
+    },
+    "engines": {
+      "title": "转写引擎",
+      "description": "当前可用性与负载。修改转写配置后请手工刷新。",
+      "local": "本地 FunASR",
+      "qwen": "Qwen3-ASR",
+      "model": "模型",
+      "workers": "Worker",
+      "running": "运行中",
+      "queued": "排队中",
+      "unavailable": "无法读取引擎状态。",
+      "stale": "刷新失败，当前显示上一次成功读取的引擎状态。"
     },
     "page": {
       "range": "第 {from}-{to} 条，共 {total} 条",
@@ -2107,8 +2132,8 @@
     "transcriber": {
       "offTitle": "转写功能未开启",
       "offBody": "转写组件是可选的，默认关闭。用安装脚本部署的，可以从菜单开启：bash install.zh.sh --manage，然后选「管理」里的 11（开启或关闭转写）。自己部署的，启用 compose 的 transcriber profile 并设置 DTK_TRANSCRIBER_URL。",
-      "downTitle": "转写组件没有响应",
-      "downBody": "它已经配置好，但健康检查没有通过，恢复之前无法转写。可以用 ./dtkctl ps 看它的容器是否在运行，用 ./dtkctl logs transcriber 看它为什么停了。",
+      "downTitle": "转写服务不可用",
+      "downBody": "转写服务已经配置，但当前没有响应或没有任何可用引擎。请先查看引擎状态卡；如果容器需要处理，可使用 ./dtkctl ps 和 ./dtkctl logs transcriber 排查。",
       "guide": "查看开启方法"
     }
   },
@@ -2120,6 +2145,12 @@
     "unavailableHint": "用 --profile downloader 启动它并设置 DTK_DOWNLOADER_URL。本实例的其他功能不受影响，缺的只是抓取文件这一步。",
     "transcription": {
       "action": "转写视频",
+      "engine": "转写引擎",
+      "local": "本地 FunASR",
+      "qwen": "千问 API",
+      "localHint": "在本服务器运行，音频不会发送给外部转写服务。",
+      "qwenHint": "把提取后的音频分片发送到已配置的阿里云千问 API。",
+      "engineUnavailable": "当前选择的转写引擎不可用。",
       "failed": "无法发起转写",
       "evicted": "视频文件已被清理，请重新下载后再发起转写。",
       "unfinished": "请等待下载完成后再发起转写。",

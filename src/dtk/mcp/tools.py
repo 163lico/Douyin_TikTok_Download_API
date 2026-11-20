@@ -77,21 +77,28 @@ TRANSCRIPTION_PROGRESS_POLL_SECONDS: Final = 1.0
 
 _TRANSCRIPTION_STAGE_PROGRESS: Final[dict[str, float]] = {
     "queued": 0.0,
-    "decode": 1.0,
-    "vad": 3.0,
-    "punctuation": 95.0,
-    "normalization": 98.0,
+    "preparing_audio": 1.0,
+    "post_processing": 95.0,
     "done": 100.0,
 }
 
 _TRANSCRIPTION_STAGE_MESSAGES: Final[dict[str, str]] = {
     "queued": "Queued for transcription.",
-    "decode": "Decoding audio.",
-    "vad": "Detecting speech segments.",
-    "asr": "Transcribing audio.",
-    "punctuation": "Adding punctuation.",
-    "normalization": "Normalizing Chinese numbers and dates.",
+    "preparing_audio": "Preparing audio.",
+    "recognizing": "Recognizing speech.",
+    "post_processing": "Post-processing text.",
     "done": "Transcription complete.",
+}
+
+_TRANSCRIPTION_STEP_MESSAGES: Final[dict[str, str]] = {
+    "decoding_audio": "Decoding audio.",
+    "extracting_and_splitting_audio": "Extracting and splitting audio.",
+    "detecting_speech": "Detecting speech segments.",
+    "local_inference": "Running local speech recognition.",
+    "external_request": "Calling the external transcription API.",
+    "merging_results": "Merging transcript chunks.",
+    "adding_punctuation": "Adding punctuation.",
+    "normalizing_text": "Normalizing text.",
 }
 
 PlatformArg = Annotated[
@@ -1033,7 +1040,7 @@ async def _report_transcription_progress(context: Context, progress: float, mess
 
 def _transcription_progress(snapshot: dict[str, Any]) -> float:
     stage = str(snapshot.get("stage") or snapshot.get("state") or "queued")
-    if stage == "asr":
+    if stage == "recognizing":
         processed = max(0, int(snapshot.get("processed_ms") or 0))
         duration = max(0, int(snapshot.get("duration_ms") or 0))
         if duration:
@@ -1054,8 +1061,12 @@ def _appended_text(previous: str, current: str) -> str:
 
 def _transcription_progress_message(snapshot: dict[str, Any], delta: str) -> str:
     stage = str(snapshot.get("stage") or snapshot.get("state") or "queued")
-    message = _TRANSCRIPTION_STAGE_MESSAGES.get(stage, "Transcription is running.")
-    if stage == "asr" and snapshot.get("progress_percent") is not None:
+    step = str(snapshot.get("step") or "")
+    message = _TRANSCRIPTION_STEP_MESSAGES.get(
+        step,
+        _TRANSCRIPTION_STAGE_MESSAGES.get(stage, "Transcription is running."),
+    )
+    if stage == "recognizing" and snapshot.get("progress_percent") is not None:
         message = f"Transcribing audio ({float(snapshot['progress_percent']):.1f}% of media)."
     if delta:
         message = f"{message} Provisional text: {delta}"

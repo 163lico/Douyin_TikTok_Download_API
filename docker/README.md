@@ -10,7 +10,7 @@ docker/
 ├── Dockerfile           api + worker + migrate (one image, three entrypoints)
 ├── Dockerfile.browser   browser-rpc (optional, --profile browser)
 ├── Dockerfile.downloader  media downloader (optional, --profile downloader)
-├── Dockerfile.transcriber offline FunASR ONNX sidecar (optional, --profile transcriber)
+├── Dockerfile.transcriber FunASR/Qwen transcription sidecar (optional, --profile transcriber)
 ├── entrypoint.sh        role dispatch and the DTK_SECRET_KEY gate
 ├── compose.yml          the stack
 ├── compose.test.yml     test fixtures only (owned elsewhere; never used here)
@@ -87,7 +87,7 @@ Stored media is capped by the `media.max_bytes` setting, 2 GiB by default.
 Past it the oldest unpinned downloads are removed and an alert says what went;
 pinning one in the console exempts it for good.
 
-With offline transcription, prepare quantized FunASR ONNX model directories
+For local transcription, prepare quantized FunASR ONNX model directories
 named `asr`, `vad` and `punc` under one host directory. The complete manual
 download and verification procedure is in
 [`documents/en/18-funasr-models.md`](../documents/en/18-funasr-models.md). Then add:
@@ -115,12 +115,31 @@ without it the default
 what the downloader stored. The guided install script can fetch and verify the
 models and write all of this for you.
 
-The models are mounted read-only and the container has no internet route. It
-reads `media-data` read-only, decodes video audio through ffmpeg, and keeps no
-intermediate WAV. Transcripts use contextual Chinese ITN by default. Set the
+The models are mounted read-only. Local jobs never use the sidecar's dedicated
+egress network. It reads `media-data` read-only, decodes video audio through
+ffmpeg, and keeps no intermediate WAV. Transcripts use contextual Chinese ITN by default. Set the
 normalization failure policy to `fail` when an unnormalized fallback must make
 the whole transcription fail. The sidecar retains only the configured number
 of recent terminal jobs for worker-restart recovery; live work is never evicted.
+
+To allow callers to explicitly select Qwen3-ASR-Flash, also configure the
+workspace-specific OpenAI-compatible endpoint:
+
+```bash
+cat >> .env <<EOF
+DTK_TRANSCRIBER_QWEN_API_KEY=replace-me
+DTK_TRANSCRIBER_QWEN_BASE_URL=https://WORKSPACE.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+DTK_TRANSCRIBER_QWEN_WORKERS=2
+DTK_TRANSCRIBER_QWEN_QUEUE_SIZE=8
+DTK_TRANSCRIBER_QWEN_TIMEOUT_SECONDS=300
+DTK_TRANSCRIBER_QWEN_MAX_RETRIES=2
+EOF
+```
+
+Qwen is used only when `POST /api/v1/transcriptions` carries
+`"engine": "qwen"`; omitted means local FunASR. The sidecar extracts mono
+16 kHz MP3 chunks, sends them as Base64 Data URIs, and never logs the key or
+encoded audio. A Qwen failure does not fall back to local inference.
 
 ## What the images are
 

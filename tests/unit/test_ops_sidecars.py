@@ -52,7 +52,7 @@ def contract(status: dict[str, Any]) -> None:
     """The shape GET /system/status promises for every optional component."""
     assert isinstance(status["configured"], bool)
     assert status["ok"] is None or isinstance(status["ok"], bool)
-    assert set(status) <= {"configured", "ok", "latency_ms", "detail_code"}
+    assert set(status) <= {"configured", "ok", "latency_ms", "detail_code", "engines"}
 
 
 # --------------------------------------------------------------------------
@@ -140,6 +140,97 @@ async def test_the_transcriber_is_asked_with_its_token() -> None:
     contract(status)
     assert status["ok"] is True
     assert seen == [TOKEN]
+
+
+async def test_transcriber_engine_health_is_sanitized() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "ok",
+                "engines": {
+                    "local": {
+                        "ready": True,
+                        "model": "paraformer-zh-large-onnx-int8",
+                        "workers": 1,
+                        "running": 1,
+                        "queued": -3,
+                        "detail": "missing at /models/private",
+                    },
+                    "qwen": {
+                        "ready": False,
+                        "model": "qwen3-asr-flash",
+                        "workers": 2,
+                        "running": "one",
+                        "queued": 4,
+                        "api_key": "secret",
+                    },
+                    "future": {"ready": True, "model": "must-not-leak"},
+                },
+            },
+        )
+
+    status = await sidecars.transcriber_status(transcriber(handler))
+
+    assert status["engines"] == {
+        "local": {
+            "ready": True,
+            "model": "paraformer-zh-large-onnx-int8",
+            "workers": 1,
+            "running": 1,
+            "queued": 0,
+        },
+        "qwen": {
+            "ready": False,
+            "model": "qwen3-asr-flash",
+            "workers": 2,
+            "running": 0,
+            "queued": 4,
+        },
+    }
+    encoded = json.dumps(status)
+    assert "secret" not in encoded
+    assert "/models" not in encoded
+    assert "future" not in encoded
+
+
+async def test_malformed_or_missing_engine_health_stays_unknown() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"status": "ok", "engines": {"local": {"ready": "yes"}}},
+        )
+
+    status = await sidecars.transcriber_status(transcriber(handler))
+
+    assert status["ok"] is True
+    assert status["engines"] == {}
+
+
+@pytest.mark.parametrize(
+    ("local_ready", "qwen_ready"),
+    [(True, True), (True, False), (False, True), (False, False)],
+)
+async def test_each_transcription_engine_keeps_its_own_readiness(
+    local_ready: bool, qwen_ready: bool
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "ok" if local_ready or qwen_ready else "degraded",
+                "engines": {
+                    "local": {"ready": local_ready},
+                    "qwen": {"ready": qwen_ready},
+                },
+            },
+        )
+
+    status = await sidecars.transcriber_status(transcriber(handler))
+
+    assert status["ok"] is (local_ready or qwen_ready)
+    assert status["engines"]["local"]["ready"] is local_ready
+    assert status["engines"]["qwen"]["ready"] is qwen_ready
 
 
 async def test_a_transcriber_without_its_model_answers_but_is_not_ok() -> None:

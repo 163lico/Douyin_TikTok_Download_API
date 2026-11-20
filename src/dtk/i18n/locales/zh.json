@@ -871,6 +871,7 @@
       },
       "TranscriptionRequest": {
         "download_id": "包含源视频的下载记录 UUID。",
+        "engine": "转写引擎。`local` 使音频始终留在本实例；`qwen` 会把提取后的音频发送到已配置的千问 API。",
         "normalize": "对数字、日期、金额等表达执行基于上下文的中文逆文本归一化。",
         "refresh": "创建新的转写记录，而不是复用已有成功结果。"
       },

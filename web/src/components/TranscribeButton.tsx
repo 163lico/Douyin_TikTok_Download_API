@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 
 import { Button } from './Button'
+import { Select } from './Select'
 import { useToast } from './Toast'
 import { useApiMutation, useApiQuery, useSession } from '@/hooks'
 import { apiPost } from '@/lib/api'
@@ -13,6 +15,17 @@ import { atLeast } from '@/lib/roles'
 export interface ExistingTranscription {
   transcription_id: string
   state: string
+  engine?: TranscriptionEngine
+}
+
+export type TranscriptionEngine = 'local' | 'qwen'
+
+export interface TranscriberEngineHealth {
+  ready: boolean
+  model: string | null
+  workers: number
+  running: number
+  queued: number
 }
 
 export interface TranscribeButtonProps {
@@ -34,17 +47,41 @@ export interface TranscribeButtonProps {
  *
  * `off` is the profile not being enabled, which is the default - the button
  * was always enabled and every click answered TRANSCRIBER_UNAVAILABLE. `down`
- * is configured and not answering. `unknown` covers a server that does not
- * report the component (older builds) and a status read that failed; nothing
- * is blocked on it, so the button behaves as it always did.
+ * is configured but unreachable or has no ready engine. `unknown` covers a
+ * server that does not report the component (older builds) and a status read
+ * that failed; nothing is blocked on it, so the button behaves as it always did.
  */
 export type TranscriberState = 'ready' | 'off' | 'down' | 'unknown'
 
 interface StatusComponents {
-  components?: Record<string, { configured?: boolean; ok?: boolean | null } | undefined>
+  components?: Record<
+    string,
+    | {
+        configured?: boolean
+        ok?: boolean | null
+        engines?: Partial<Record<TranscriptionEngine, TranscriberEngineHealth>>
+      }
+    | undefined
+  >
 }
 
-export function useTranscriberState(): TranscriberState {
+export type TranscriberEngineState =
+  | 'available'
+  | 'unavailable'
+  | 'unknown'
+  | 'not_configured'
+  | 'unreachable'
+
+export interface TranscriberStatus {
+  state: TranscriberState
+  engines: Partial<Record<TranscriptionEngine, TranscriberEngineHealth>>
+  isLoading: boolean
+  isError: boolean
+  hasData: boolean
+  refresh: () => void
+}
+
+export function useTranscriberStatus(): TranscriberStatus {
   // Read when it is needed rather than polled: the status call probes every
   // component, and whether a compose profile is on changes by redeploying,
   // not while a drawer is open.
@@ -52,12 +89,41 @@ export function useTranscriberState(): TranscriberState {
     key: ['system', 'status'],
     path: paths.system.status,
     retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
   const component = status.data?.components?.['transcriber']
-  if (!component || typeof component.configured !== 'boolean') return 'unknown'
-  if (!component.configured) return 'off'
-  if (component.ok === false) return 'down'
-  return component.ok === true ? 'ready' : 'unknown'
+  let state: TranscriberState = 'unknown'
+  if (component && typeof component.configured === 'boolean') {
+    if (!component.configured) state = 'off'
+    else if (component.ok === false) state = 'down'
+    else if (component.ok === true) state = 'ready'
+  }
+  return {
+    state,
+    engines: component?.engines ?? {},
+    isLoading: status.isLoading,
+    isError: status.isError,
+    hasData: status.data !== undefined,
+    refresh: () => {
+      void status.refetch()
+    },
+  }
+}
+
+export function useTranscriberState(): TranscriberState {
+  return useTranscriberStatus().state
+}
+
+export function transcriberEngineState(
+  status: Pick<TranscriberStatus, 'state' | 'engines'>,
+  engine: TranscriptionEngine,
+): TranscriberEngineState {
+  const health = status.engines[engine]
+  if (health) return health.ready ? 'available' : 'unavailable'
+  if (status.state === 'off') return 'not_configured'
+  if (status.state === 'down') return 'unreachable'
+  return 'unknown'
 }
 
 /** The installation guide's section on the optional profiles, per language. */
@@ -115,13 +181,18 @@ export function TranscribeButton({
   const toast = useToast()
   const [, navigate] = useLocation()
   const session = useSession()
-  const transcriber = useTranscriberState()
+  const transcriberStatus = useTranscriberStatus()
+  const transcriber = transcriberStatus.state
+  const [engine, setEngine] = useState<TranscriptionEngine>('local')
 
-  const transcribe = useApiMutation<{ transcription_id: string }, string>(
-    (id) =>
+  const transcribe = useApiMutation<
+    { transcription_id: string },
+    { id: string; engine: TranscriptionEngine }
+  >(
+    ({ id, engine: selectedEngine }) =>
       apiPost(
         paths.transcriptions.create,
-        { download_id: id, normalize: true, refresh: false },
+        { download_id: id, engine: selectedEngine, normalize: true, refresh: false },
         { awaitTask: false },
       ),
     {
@@ -134,43 +205,74 @@ export function TranscribeButton({
 
   if (!atLeast(session.data?.role ?? null, 'viewer')) return null
 
-  // Before the transcriber check: a transcript already made can be read
-  // whether or not the transcriber is running now.
-  if (existing) {
-    return (
-      <div>
-        <Button
-          variant="primary"
-          onClick={() => {
-            navigate(transcriptHref(existing.transcription_id))
-          }}
-        >
-          {existing.state === 'done'
-            ? t('downloads.transcription.open')
-            : t('downloads.transcription.openRunning')}
-        </Button>
-      </div>
-    )
-  }
-
   const blocked = transcriber === 'off' || transcriber === 'down'
-  const reason = unavailable ?? (blocked ? t(`transcriptions.transcriber.${transcriber}Title`) : null)
+  const selectedEngineState = transcriberEngineState(transcriberStatus, engine)
+  const selectedEngineUnavailable = ['unavailable', 'not_configured', 'unreachable'].includes(
+    selectedEngineState,
+  )
+  const engineReason =
+    selectedEngineState === 'unavailable'
+      ? t('downloads.transcription.engineUnavailable')
+      : null
+  const reason =
+    unavailable ??
+    (blocked ? t(`transcriptions.transcriber.${transcriber}Title`) : engineReason)
+  // Older servers did not attach the engine to download listings; those
+  // records predate Qwen and are therefore local.
+  const existingEngine = existing?.engine ?? 'local'
+  const opensExisting = existing !== null && existingEngine === engine
 
   return (
-    <div>
+    <div className="u-stack-sm">
+      <Select
+        label={t('downloads.transcription.engine')}
+        description={t(`downloads.transcription.${engine}Hint`)}
+        value={engine}
+        disabled={transcribe.isPending}
+        onChange={(event) => setEngine(event.target.value as TranscriptionEngine)}
+        options={[
+          {
+            value: 'local',
+            label: t('downloads.transcription.local'),
+            disabled: ['unavailable', 'not_configured', 'unreachable'].includes(
+              transcriberEngineState(transcriberStatus, 'local'),
+            ),
+          },
+          {
+            value: 'qwen',
+            label: t('downloads.transcription.qwen'),
+            disabled: ['unavailable', 'not_configured', 'unreachable'].includes(
+              transcriberEngineState(transcriberStatus, 'qwen'),
+            ),
+          },
+        ]}
+      />
       <Button
         variant="primary"
         loading={transcribe.isPending}
-        disabled={downloadId === null || reason !== null || transcribe.isPending}
-        title={reason ?? undefined}
+        disabled={
+          !opensExisting &&
+          (downloadId === null || reason !== null || selectedEngineUnavailable || transcribe.isPending)
+        }
+        title={!opensExisting ? (reason ?? undefined) : undefined}
         onClick={() => {
-          if (downloadId !== null) transcribe.mutate(downloadId)
+          if (opensExisting && existing) {
+            navigate(transcriptHref(existing.transcription_id))
+          } else if (downloadId !== null) {
+            transcribe.mutate({ id: downloadId, engine })
+          }
         }}
       >
-        {t('downloads.transcription.action')}
+        {opensExisting && existing
+          ? existing.state === 'done'
+            ? t('downloads.transcription.open')
+            : t('downloads.transcription.openRunning')
+          : t('downloads.transcription.action')}
       </Button>
       {unavailable ? (
         <p className="u-xs u-muted">{unavailable}</p>
+      ) : engineReason && !opensExisting ? (
+        <p className="u-xs u-muted">{engineReason}</p>
       ) : (
         <TranscriberNotice state={transcriber} />
       )}

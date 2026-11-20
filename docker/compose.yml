@@ -85,6 +85,8 @@ x-app-backups: &app-backups
     - backup-data:/var/lib/dtk/backups
   environment:
     DTK_BACKUP_DIR: /var/lib/dtk/backups
+    # Only the transcriber may receive the external provider credential.
+    DTK_TRANSCRIBER_QWEN_API_KEY: ""
 
 x-app: &app
   <<: [*app-image, *app-env, *app-hardening, *app-backups, *app-limits]
@@ -121,6 +123,7 @@ services:
       # database has no use for the key that encrypts its own contents, so it is
       # blanked out here even though the shared env file carries it.
       DTK_SECRET_KEY: ""
+      DTK_TRANSCRIBER_QWEN_API_KEY: ""
       POSTGRES_DB: dtk
       POSTGRES_USER: dtk
       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
@@ -162,6 +165,7 @@ services:
         required: false
     environment:
       DTK_SECRET_KEY: ""
+      DTK_TRANSCRIBER_QWEN_API_KEY: ""
     # $$ escapes compose interpolation, so REDIS_PASSWORD is expanded by the
     # shell inside the container from the env file rather than being written
     # into the resolved compose config.
@@ -247,6 +251,7 @@ services:
       # archives the worker writes, so the two must name the same directory.
       DTK_BACKUP_DIR: /var/lib/dtk/backups
       DTK_MEDIA_DIR: /var/lib/dtk/media
+      DTK_TRANSCRIBER_QWEN_API_KEY: ""
     volumes:
       # Repeated for the same YAML reason as the environment above: naming any
       # volume here replaces the anchor's list wholesale.
@@ -401,6 +406,7 @@ services:
       # This container holds no credentials and never talks to the database, so
       # the master key that arrives with the shared env file is blanked here.
       DTK_SECRET_KEY: ""
+      DTK_TRANSCRIBER_QWEN_API_KEY: ""
       # Fixed by the container, not by the operator: the bind address has to
       # match `expose` and the healthcheck, and the profile root has to match
       # the tmpfs mounted below.
@@ -532,6 +538,7 @@ services:
       DTK_SECRET_KEY: ""
       DTK_DATABASE_URL: ""
       DTK_REDIS_URL: ""
+      DTK_TRANSCRIBER_QWEN_API_KEY: ""
       # Fixed by the container: the bind address has to match `expose`, the
       # healthcheck and the volume mounted below.
       DTK_DOWNLOADER_BIND: "0.0.0.0:9100"
@@ -598,6 +605,9 @@ services:
       - "9200"
     networks:
       - compute
+      # Dedicated outbound path for explicitly selected Qwen jobs. The service
+      # still exposes no host port and database/Redis remain off this network.
+      - transcriber-egress
     volumes:
       - media-data:/var/lib/dtk/media:ro
       - ${DTK_TRANSCRIBER_MODEL_PATH:-./models/funasr-onnx}:/models/funasr:ro
@@ -635,10 +645,13 @@ networks:
   data:
     internal: true
   edge: {}
-  # The transcriber, and the api and worker that call it. No gateway either:
-  # the models are mounted, so the sidecar has no reason to reach anything.
+  # The private request path between the transcriber and its callers. External
+  # Qwen calls leave through transcriber-egress, never through this network.
   compute:
     internal: true
+  # Only the transcriber joins this network. It supplies outbound connectivity
+  # for explicitly selected Qwen jobs without exposing a host port.
+  transcriber-egress: {}
 
 volumes:
   postgres-data:

@@ -123,12 +123,18 @@ export { ToastProvider, useToast } from './Toast'
 export {
   TranscribeButton,
   TranscriberNotice,
+  transcriberEngineState,
   transcriberGuideHref,
   useTranscriberState,
+  useTranscriberStatus,
 } from './TranscribeButton'
 export type {
   ExistingTranscription,
+  TranscriberEngineHealth,
+  TranscriberEngineState,
+  TranscriberStatus,
   TranscribeButtonProps,
+  TranscriptionEngine,
   TranscriberState,
 } from './TranscribeButton'
 export type { ToastApi, ToastOptions, ToastTone } from './Toast'

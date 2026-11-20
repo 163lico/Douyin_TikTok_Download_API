@@ -75,6 +75,13 @@
       "unhealthy": "Unhealthy",
       "unknown": "Unknown"
     },
+    "transcriptionEngine": {
+      "available": "Available",
+      "unavailable": "Unavailable",
+      "unknown": "Unknown",
+      "notConfigured": "Not configured",
+      "unreachable": "Cannot check"
+    },
     "key": {
       "active": "Active",
       "revoked": "Revoked",

@@ -69,6 +69,7 @@ async def test_completed_result_is_refreshed_before_serialization(
         download_id=download_id,
         normalization_requested=True,
         normalization_failure_policy="fallback",
+        engine="local",
         model="paraformer-zh-large-onnx-int8",
     )
     download = SimpleNamespace(files_removed_at=None, directory="douyin/author/post")
@@ -121,6 +122,7 @@ async def test_existing_sidecar_result_is_reused_without_resubmission(
         download_id=download_id,
         normalization_requested=False,
         normalization_failure_policy=None,
+        engine="local",
         model="paraformer-zh-large-onnx-int8",
     )
     download = SimpleNamespace(files_removed_at=None, directory="douyin/author/post")
@@ -179,6 +181,7 @@ async def test_running_progress_is_published_then_cleared(
         download_id=download_id,
         normalization_requested=True,
         normalization_failure_policy="fallback",
+        engine="local",
         model="paraformer-zh-large-onnx-int8",
     )
     session = FakeSession(SimpleNamespace(files_removed_at=None, directory="post"))
@@ -202,7 +205,8 @@ async def test_running_progress_is_published_then_cleared(
             self.submitted = True
             return {
                 "state": "running",
-                "stage": "asr",
+                "stage": "recognizing",
+                "step": "local_inference",
                 "progress_revision": 2,
                 "processed_ms": 500,
                 "media_duration_ms": 1000,
@@ -250,7 +254,8 @@ async def test_running_progress_is_published_then_cleared(
     assert published == [
         {
             "state": "running",
-            "stage": "asr",
+            "stage": "recognizing",
+            "step": "local_inference",
             "progress_revision": 2,
             "processed_ms": 500,
             "media_duration_ms": 1000,
@@ -274,11 +279,19 @@ class PollingClient(FakeClient):
         self.reads += 1
         if self.missing_after is not None and self.reads > self.missing_after:
             raise TranscriberUnavailable("transcriber /jobs/x refused the request: no such job")
-        return {"state": "running", "stage": "asr"}
+        return {
+            "state": "running",
+            "stage": "recognizing",
+            "step": "local_inference",
+        }
 
     async def submit(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.submitted.append(payload)
-        return {"state": "running", "stage": "asr"}
+        return {
+            "state": "running",
+            "stage": "recognizing",
+            "step": "local_inference",
+        }
 
 
 class SettlingSession(FakeSession):
@@ -301,6 +314,7 @@ def _row(state: str = "running") -> SimpleNamespace:
         download_id=uuid.uuid4(),
         normalization_requested=True,
         normalization_failure_policy="fallback",
+        engine="local",
         model="paraformer-zh-large-onnx-int8",
     )
 

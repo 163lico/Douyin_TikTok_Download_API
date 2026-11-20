@@ -96,6 +96,7 @@ async def test_list_filters_and_omits_full_text(api_app, db_engine, redis_client
         {
             "state": "running",
             "stage": "recognizing",
+            "step": "external_request",
             "progress_percent": 25,
             "partial_text": "provisional words",
         },
