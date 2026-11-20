@@ -169,13 +169,18 @@ class FakeTranscriptions:
         self.reused = reused
         self.final_state = final_state
         self.error = error
+        self.engine = "local"
+        self.started: list[dict[str, Any]] = []
 
-    async def start(self, *_args: Any, **_kwargs: Any) -> tuple[dict[str, Any], str | None]:
+    async def start(self, *_args: Any, **kwargs: Any) -> tuple[dict[str, Any], str | None]:
+        self.started.append(kwargs)
+        self.engine = kwargs["engine"]
         return (
             {
                 "transcription_id": "7afe9635-9deb-4590-b76a-46a18c38bf7b",
                 "task_id": TASK_ID,
                 "state": self.start_state,
+                "engine": kwargs["engine"],
                 "text": "Final text." if self.start_state == "done" else None,
             },
             self.reused,
@@ -186,6 +191,7 @@ class FakeTranscriptions:
             "transcription_id": transcription_id,
             "task_id": TASK_ID,
             "state": self.final_state,
+            "engine": self.engine,
             "text": "Final text." if self.final_state == "done" else None,
             "error": self.error,
         }
@@ -283,6 +289,11 @@ class TestRegistration:
     def test_transcription_normalization_is_public_and_enabled_by_default(self, tools):
         schema = tools["transcribe_video"].input_schema
         assert schema["properties"]["normalize"]["default"] is True
+
+    def test_transcription_engine_is_public_and_defaults_to_local(self, tools):
+        schema = tools["transcribe_video"].input_schema
+        assert schema["properties"]["engine"]["default"] == "local"
+        assert schema["properties"]["engine"]["enum"] == ["local", "qwen"]
 
     def test_download_defaults_are_safe_for_general_use(self, tools):
         schema = tools["download_media"].input_schema
@@ -854,6 +865,40 @@ class TestMediaDownloads:
         assert result["download_id"] == download_id
         assert result["data"]["id"] == download_id
         assert downloads.read == [download_id]
+
+
+class TestMediaTranscriptions:
+    async def test_transcription_defaults_to_the_local_engine(self):
+        transcriptions = FakeTranscriptions(start_state="done", reused="completed")
+        tools = ToolSet(make_context(transcriptions=transcriptions))
+
+        result = await tools.transcribe_video("8afe9635-9deb-4590-b76a-46a18c38bf7b")
+
+        assert result["data"]["engine"] == "local"
+        assert transcriptions.started[0]["engine"] == "local"
+
+    async def test_transcription_passes_the_qwen_engine_to_the_gateway(self):
+        transcriptions = FakeTranscriptions(start_state="done", reused="completed")
+        tools = ToolSet(make_context(transcriptions=transcriptions))
+
+        result = await tools.transcribe_video("8afe9635-9deb-4590-b76a-46a18c38bf7b", engine="qwen")
+
+        assert result["data"]["engine"] == "qwen"
+        assert transcriptions.started[0]["engine"] == "qwen"
+
+    async def test_qwen_failure_does_not_retry_with_the_local_engine(self):
+        failed = TaskOutcome(
+            TASK_ID,
+            TaskState.FAILED,
+            error={"code": "TRANSCRIBER_DOWN", "message": "qwen is unavailable"},
+        )
+        transcriptions = FakeTranscriptions()
+        tools = ToolSet(make_context(FakeTasks(wait=failed), transcriptions=transcriptions))
+
+        with pytest.raises(ToolError):
+            await tools.transcribe_video("8afe9635-9deb-4590-b76a-46a18c38bf7b", engine="qwen")
+
+        assert [call["engine"] for call in transcriptions.started] == ["qwen"]
 
 
 class TestTranscriptionProgress:
@@ -1661,6 +1706,43 @@ class TestHttpTransport:
         assert response.headers["x-accel-buffering"] == "no"
         assert '"method":"notifications/progress"' in response.text
         assert response.text.index("Temporary text") < response.text.index("Final text.")
+
+    def test_transcription_engine_is_validated_and_forwarded_over_http(self, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        _authenticate(monkeypatch, frozenset({Scope.TRANSCRIPTION_WRITE}))
+        transcriptions = FakeTranscriptions(start_state="done", reused="completed")
+        with TestClient(_mounted_app(transcriptions=transcriptions)) as client:
+            accepted = _rpc(
+                client,
+                "tools/call",
+                {
+                    "name": "transcribe_video",
+                    "arguments": {
+                        "download_id": "8afe9635-9deb-4590-b76a-46a18c38bf7b",
+                        "engine": "qwen",
+                    },
+                },
+            )
+            refused = _rpc(
+                client,
+                "tools/call",
+                {
+                    "name": "transcribe_video",
+                    "arguments": {
+                        "download_id": "8afe9635-9deb-4590-b76a-46a18c38bf7b",
+                        "engine": "unknown",
+                    },
+                },
+            )
+
+        assert accepted.status_code == 200
+        assert len(transcriptions.started) == 1
+        assert transcriptions.started[0]["engine"] == "qwen"
+        assert transcriptions.started[0]["normalize"] is True
+        assert transcriptions.started[0]["refresh"] is False
+        assert refused.status_code == 200
+        assert '"isError":true' in refused.text.replace(" ", "")
 
     def test_transcription_without_progress_token_has_no_progress_notification(self, monkeypatch):
         from fastapi.testclient import TestClient

@@ -196,12 +196,13 @@ parse_url → download_media(url) → transcribe_video(download_id)
 
 ### `transcribe_video`
 
-传入 `download_media` 返回的 `download_id`、可选的 `normalize`（默认 `true`）和可选的 `refresh`。它需要 `transcription:write`，并且转写服务的 compose profile 必须在运行。FunASR 处理中英混合语音；中文 ITN 会按上下文转换口语数字、日期、金额等表达。同一个视频已有完成的转写时会直接复用，除非 `refresh` 为 true；复用还会区分归一化开关、引擎版本以及实例配置的 fallback/fail 策略；转写进行中再次请求会加入正在跑的那一个。工具最多等待 `api.mcp_tool_timeout`，完成则返回全文，超时则返回 `pending`，带一段 `message`、`task_id` 和 `transcription_id`。失败或被取消的转写会作为工具错误返回并说明原因。
+传入 `download_media` 返回的 `download_id`，以及可选的 `engine`（`local` 或 `qwen`，默认 `local`）、`normalize`（默认 `true`）和 `refresh`。它需要 `transcription:write`，并且转写服务的 compose profile 必须在运行。`local` 使用本实例的 FunASR；`qwen` 会把音频发送给运营者配置的外部 Qwen 服务。工具不接受模型名、API 地址或密钥，也不会在两个引擎之间自动回退。中文 ITN 会按上下文转换口语数字、日期、金额等表达。同一个视频已有相同引擎的完成转写时会直接复用，除非 `refresh` 为 true；复用还会区分归一化开关、模型版本以及实例配置的 fallback/fail 策略；转写进行中再次请求会加入相同引擎正在跑的那一个。工具最多等待 `api.mcp_tool_timeout`，完成则返回全文，超时则返回 `pending`，带一段 `message`、`task_id` 和 `transcription_id`。失败或被取消的转写会作为工具错误返回并说明原因。
 
 客户端携带 MCP 的 `_meta.progressToken` 时，同一次工具调用在等待期间还会发送
-`notifications/progress`。更新会标明当前流水线阶段（`queued`、`decode`、`vad`、
-`asr`、`punctuation`、`normalization` 或 `done`）；ASR 阶段同时给出媒体处理进度，并且只发送
-本次新增的临时识别文本。这些文字是追加式的原始 ASR 临时稿：标点和中文数字、日期
+`notifications/progress`。更新会按任务生命周期显示排队或完成状态；运行期间使用
+`preparing_audio`、`recognizing`、`post_processing` 三个通用阶段，并可携带当前引擎的
+具体 `step`。识别阶段同时给出媒体处理进度，并且只发送本次新增的临时识别文本。
+这些文字是追加式的原始 ASR 临时稿：合并、标点和中文数字、日期
 归一化都在识别结束后统一执行，因此最终工具结果才是权威文本，也可能修订临时稿。
 未请求或不展示 MCP progress 的客户端保持原有行为，只会看到最终结果。progress 属于
 客户端 UI 旁路，不保证进入模型上下文。当前 Dify 内置 MCP 客户端未在 `tools/call` 中

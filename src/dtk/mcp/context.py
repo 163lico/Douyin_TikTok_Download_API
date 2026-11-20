@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from dtk.core.config import Config
 from dtk.core.types import Platform, TaskState
@@ -76,11 +76,15 @@ class TaskGateway(Protocol):
         ...
 
 
+TranscriptionEngine = Literal["local", "qwen"]
+
+
 class TranscriptionGateway(Protocol):
     async def start(
         self,
         download_id: str,
         *,
+        engine: TranscriptionEngine,
         normalize: bool,
         refresh: bool,
         requested_by: Any | None,
@@ -263,5 +267,6 @@ __all__ = [
     "PoolSnapshot",
     "TaskGateway",
     "TaskOutcome",
+    "TranscriptionEngine",
     "TranscriptionGateway",
 ]

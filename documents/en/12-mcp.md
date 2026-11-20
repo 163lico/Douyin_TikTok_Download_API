@@ -197,13 +197,14 @@ parse_url → download_media(url) → transcribe_video(download_id)
 
 ### `transcribe_video`
 
-Pass the `download_id` from `download_media`, optional `normalize` (default `true`), and optional `refresh`. It needs `transcription:write`, and the transcriber compose profile has to be running. FunASR handles mixed Chinese and English; contextual Chinese ITN converts spoken numbers, dates, amounts and similar expressions. A finished transcript of the same video is reused unless `refresh` is true, and reuse also distinguishes normalization mode, engine version and the instance's fallback/fail policy; a request made while one is running joins it. The tool waits up to `api.mcp_tool_timeout`, then returns the full text, or `pending` with a `message`, the `task_id` and the `transcription_id`. A failed or cancelled transcription is a tool error that says why.
+Pass the `download_id` from `download_media`, optional `engine` (`local` or `qwen`, default `local`), optional `normalize` (default `true`), and optional `refresh`. It needs `transcription:write`, and the transcriber compose profile has to be running. `local` uses FunASR on this instance; `qwen` sends the audio to the external Qwen service configured by the operator. The tool accepts no model name, API address or credential and never falls back between engines. A finished transcript of the same video and engine is reused unless `refresh` is true, and reuse also distinguishes normalization mode, model version and the instance's fallback/fail policy; a request made while one is running joins the matching engine's job. The tool waits up to `api.mcp_tool_timeout`, then returns the full text, or `pending` with a `message`, the `task_id` and the `transcription_id`. A failed or cancelled transcription is a tool error that says why.
 
 When the client supplies MCP's `_meta.progressToken`, the same tool call also emits
-`notifications/progress` while it waits. Updates name the current pipeline stage
-(`queued`, `decode`, `vad`, `asr`, `punctuation`, `normalization`, or `done`), and ASR updates
+`notifications/progress` while it waits. Updates show the queued or completed lifecycle state;
+while running they use the three engine-neutral stages `preparing_audio`, `recognizing`, and
+`post_processing`, optionally with the current engine-specific `step`. Recognition updates
 include media progress plus only the newly recognized provisional text. That text is
-append-only raw ASR output: punctuation and Chinese number/date normalization happen
+append-only raw ASR output: merging, punctuation and Chinese number/date normalization happen
 after recognition, so the final tool result is authoritative and may revise it. Clients
 that do not request or display MCP progress keep the original behaviour and see only the
 final result. Progress is a client UI channel and is not guaranteed to enter the model's

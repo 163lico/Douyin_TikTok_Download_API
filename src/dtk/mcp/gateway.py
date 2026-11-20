@@ -29,7 +29,13 @@ from dtk.core.errors import InvalidParam, TaskNotFound
 from dtk.core.types import Outcome, Platform
 from dtk.db.models import ContentSnapshot, RequestLog
 from dtk.identity.pool import IdentityPool
-from dtk.mcp.context import EndpointHealth, HistoryPoint, PoolSnapshot, TaskOutcome
+from dtk.mcp.context import (
+    EndpointHealth,
+    HistoryPoint,
+    PoolSnapshot,
+    TaskOutcome,
+    TranscriptionEngine,
+)
 from dtk.mcp.routing import known_endpoints
 from dtk.platforms.registry import available_platforms
 from dtk.scheduler import circuit
@@ -114,6 +120,7 @@ class ServiceTranscriptionGateway:
         self,
         download_id: str,
         *,
+        engine: TranscriptionEngine,
         normalize: bool,
         refresh: bool,
         requested_by: Any | None,
@@ -132,6 +139,7 @@ class ServiceTranscriptionGateway:
                 config=self._config(),
                 normalization_failure_policy=self._normalization_failure_policy,
                 download_id=parsed_download,
+                engine=engine,
                 normalize=normalize,
                 refresh=refresh,
                 requested_by=requested_by,

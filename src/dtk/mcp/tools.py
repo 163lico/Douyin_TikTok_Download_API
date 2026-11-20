@@ -44,7 +44,13 @@ from dtk.core.errors import (
 from dtk.core.logging import get_logger
 from dtk.core.types import PLATFORM_READ_SCOPES, Platform, Scope, TaskState, UserRole
 from dtk.mcp import prose, routing
-from dtk.mcp.context import EndpointHealth, McpContext, PoolSnapshot, TaskOutcome
+from dtk.mcp.context import (
+    EndpointHealth,
+    McpContext,
+    PoolSnapshot,
+    TaskOutcome,
+    TranscriptionEngine,
+)
 from dtk.platforms.paging import MAX_PAGE_SIZE
 from dtk.urls import first_url, identify
 
@@ -829,6 +835,16 @@ class ToolSet:
             str,
             Field(description="The download_id download_media returned for the post."),
         ],
+        engine: Annotated[
+            TranscriptionEngine,
+            Field(
+                default="local",
+                description=(
+                    "Transcription engine. local runs FunASR on this instance; qwen sends "
+                    "the audio to the external Qwen service configured by the operator."
+                ),
+            ),
+        ] = "local",
         normalize: Annotated[
             bool,
             Field(
@@ -848,16 +864,20 @@ class ToolSet:
         """Transcribe the speech in a video this instance has stored.
 
         Takes the download_id from download_media; a post that is not stored
-        yet has to go through that tool first. The speech model runs on this
-        instance and the transcript is kept, so asking again for the same video
-        returns the stored text unless refresh is true, and asking while one is
-        running joins it rather than starting a second.
+        yet has to go through that tool first. Local FunASR runs on this
+        instance; Qwen sends the audio to the external service configured by
+        the operator. The transcript is kept, so asking again for the same
+        video and engine returns the stored text unless refresh is true, and
+        asking while one is running joins it rather than starting a second.
         """
-        return await self._guarded(self._transcribe_video(download_id, normalize, refresh, context))
+        return await self._guarded(
+            self._transcribe_video(download_id, engine, normalize, refresh, context)
+        )
 
     async def _transcribe_video(
         self,
         download_id: str,
+        engine: TranscriptionEngine,
         normalize: bool,
         refresh: bool,
         context: Context | None,
@@ -868,6 +888,7 @@ class ToolSet:
             raise NotConfigured("transcription is not configured on this instance")
         record, reused = await gateway.start(
             routing.require_text(download_id, "download_id"),
+            engine=engine,
             normalize=normalize,
             refresh=refresh,
             requested_by=getattr(caller, "api_key_id", None),
